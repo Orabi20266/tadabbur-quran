@@ -1,4 +1,4 @@
-import { alignToken } from './align';
+import { alignToken, matchAt } from './align';
 import type { DetectorWord, EventType } from './types';
 
 export interface TrackerMeta {
@@ -33,6 +33,16 @@ export class TranscriptTracker {
   private done = false;
   /** Cursor index that already received a wrong event for the current attempt. */
   private flagged = -1;
+  /**
+   * First word of a possible restart from an earlier position. We wait for the
+   * next token to continue the same sequence before moving the cursor back.
+   */
+  private pendingRewind: {
+    target: number;
+    span: number;
+    token: string;
+    score: number;
+  } | null = null;
 
   constructor(cfg: TranscriptTrackerConfig) {
     this.cfg = cfg;
@@ -76,12 +86,40 @@ export class TranscriptTracker {
       return;
     }
 
+    // A candidate restart is confirmed only when the reader continues with the
+    // word that follows the earlier one. A token from the last two words may be
+    // classified as a stutter, so this check has to come before alignment.
+    if (this.pendingRewind) {
+      const pair = this.findRestartPair(this.pendingRewind.token, token);
+      if (pair) {
+        const firstToken = this.pendingRewind.token;
+        this.pendingRewind = null;
+        this.applyRewind(pair, firstToken, token);
+        return;
+      }
+    }
+
     const alignment = alignToken(token, this.cfg.normalized, this.cursor);
     if (alignment.kind === 'none') {
+      // A stray token inside a possible restart should not become a false
+      // mistake; keep waiting for the continuation token.
+      if (this.pendingRewind) return;
       this.handleWrong(token);
       return;
     }
-    if (alignment.kind === 'repeat') return;
+    if (alignment.kind === 'repeat' || alignment.kind === 'rewind') {
+      this.pendingRewind = {
+        target: this.cursor + alignment.offset,
+        span: alignment.span,
+        token,
+        score: alignment.score,
+      };
+      return;
+    }
+
+    // A forward word means the reader is continuing from the cursor, so any
+    // unfinished restart candidate is no longer relevant.
+    this.pendingRewind = null;
 
     // While held on a word, only that word (or words merged with it) releases
     // the hold. Do not let a later word jump over the one being corrected.
@@ -128,6 +166,66 @@ export class TranscriptTracker {
     if (this.cursor >= this.cfg.normalized.length) this.finish();
   }
 
+  /**
+   * Find where two consecutive heard tokens occur earlier in the passage. The
+   * reader may have stopped and restarted from an earlier word; anchoring on a
+   * single token is unsafe because common words repeat, but two consecutive
+   * tokens are strong evidence. Forward continuation is handled separately.
+   */
+  private findRestartPair(
+    first: string,
+    second: string,
+  ): { start: number; firstSpan: number; secondSpan: number } | null {
+    const words = this.cfg.normalized;
+    for (let start = this.cursor - 1; start >= 0; start--) {
+      const head = matchAt(first, words.slice(start));
+      if (!head || head.score < 0.9) continue;
+      const mid = start + head.span;
+      // The second token belongs to the restart only if it is at or before the
+      // word we were waiting for; anything later is simply forward recitation.
+      if (mid > this.cursor) continue;
+      const tail = matchAt(second, words.slice(mid));
+      if (!tail || tail.score < 0.99) continue;
+      return { start, firstSpan: head.span, secondSpan: tail.span };
+    }
+    return null;
+  }
+
+  /**
+   * Commit a confirmed restart: move back to the replayed word, mark the
+   * replayed words correct (which clears their wrong status and any active
+   * session mistake), then continue after the second token.
+   */
+  private applyRewind(
+    pair: { start: number; firstSpan: number; secondSpan: number },
+    firstToken: string,
+    secondToken: string,
+  ): void {
+    const { start, firstSpan, secondSpan } = pair;
+    const mid = start + firstSpan;
+
+    this.cursor = start;
+    this.flagged = -1;
+    this.setBlocked(false);
+
+    for (let i = 0; i < firstSpan; i++) {
+      this.emit(this.cfg.words[start + i], 'correct', {
+        recitedText: firstToken,
+        confidence: 1,
+      });
+    }
+    for (let i = 0; i < secondSpan; i++) {
+      this.emit(this.cfg.words[mid + i], 'correct', {
+        recitedText: secondToken,
+        confidence: 1,
+      });
+    }
+
+    this.cursor = Math.min(this.cfg.normalized.length, mid + secondSpan);
+    this.cfg.onCursor(this.cursor);
+    if (this.cursor >= this.cfg.normalized.length) this.finish();
+  }
+
   private handleWrong(token: string): void {
     if (!this.cfg.detectMistakes) return;
     if (this.flagged === this.cursor) return;
@@ -137,6 +235,7 @@ export class TranscriptTracker {
   }
 
   private advanceCorrect(count: number): void {
+    this.pendingRewind = null;
     for (let i = 0; i < count; i++) {
       const word = this.cfg.words[this.cursor];
       if (!word) break;

@@ -158,4 +158,67 @@ describe('TranscriptTracker', () => {
     expect(h.cursor()).toBe(2);
     expect(h.events.map((e) => e.type)).toEqual(['correct', 'correct']);
   });
+
+  it('does not rewind for a single earlier word', () => {
+    const h = makeTracker();
+    h.tracker.feed(spoken.slice(0, 10));
+    h.tracker.feed([spoken[6]]);
+    expect(h.cursor()).toBe(10);
+    expect(h.events).toHaveLength(10);
+  });
+
+  it('rewinds when two consecutive earlier words are recited', () => {
+    const h = makeTracker();
+    h.tracker.feed(spoken.slice(0, 10));
+    h.tracker.feed([spoken[6], spoken[7]]);
+    expect(h.cursor()).toBe(8);
+    expect(h.events.slice(-2).map((e) => [e.key, e.type])).toEqual([
+      [allWords[6].key, 'correct'],
+      [allWords[7].key, 'correct'],
+    ]);
+  });
+
+  it('rewinds when the restart begins one word before the cursor', () => {
+    const h = makeTracker();
+    h.tracker.feed(spoken.slice(0, 10));
+    h.tracker.feed([spoken[9], spoken[10]]);
+    expect(h.cursor()).toBe(11);
+    expect(h.events.slice(-2).map((e) => e.type)).toEqual(['correct', 'correct']);
+  });
+
+  it('keeps the forward cursor when the reader continues after a stray word', () => {
+    const h = makeTracker();
+    h.tracker.feed(spoken.slice(0, 10));
+    h.tracker.feed([spoken[6]]);
+    h.tracker.feed([spoken[10]]);
+    expect(h.cursor()).toBe(11);
+    expect(h.events).toHaveLength(11);
+  });
+
+  it('clears a hold when the reader restarts earlier', () => {
+    const h = makeTracker({ dontProgressUntilFixed: true });
+    h.tracker.feed(spoken.slice(0, 10));
+    h.tracker.feed([spoken[11]]);
+    expect(h.blocked()).toBe(true);
+    expect(h.cursor()).toBe(10);
+
+    h.tracker.feed([spoken[6], spoken[7]]);
+    expect(h.blocked()).toBe(false);
+    expect(h.cursor()).toBe(8);
+
+    h.tracker.feed(spoken.slice(8, 11));
+    expect(h.cursor()).toBe(11);
+  });
+
+  it('rewinds with a merged token for the earlier words', () => {
+    const h = makeTracker();
+    h.tracker.feed(spoken.slice(0, 10));
+    h.tracker.feed([spoken[6] + spoken[7], spoken[8]]);
+    expect(h.cursor()).toBe(9);
+    expect(h.events.slice(-3).map((e) => e.key)).toEqual([
+      allWords[6].key,
+      allWords[7].key,
+      allWords[8].key,
+    ]);
+  });
 });

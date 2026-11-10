@@ -91,7 +91,7 @@ export function matchAt(token: string, expected: string[]): WordMatch | null {
   return best;
 }
 
-export type AlignmentKind = 'match' | 'repeat' | 'none';
+export type AlignmentKind = 'match' | 'repeat' | 'rewind' | 'none';
 
 export interface Alignment {
   kind: AlignmentKind;
@@ -105,8 +105,10 @@ export interface Alignment {
 export interface AlignOptions {
   /** How far ahead to look for a skipped word. */
   lookAhead?: number;
-  /** How far back to look for a stutter/repetition. */
+  /** How far back to look for a stutter/repetition that should be ignored. */
   lookBack?: number;
+  /** How far back to look for a deliberate restart after a pause. */
+  maxRewind?: number;
 }
 
 /**
@@ -114,7 +116,9 @@ export interface AlignOptions {
  *
  * Exact matches win over fuzzy ones, then the earliest position wins. A token
  * that only repeats a recently recited word is ignored, so a stutter does not
- * get recorded as a mistake.
+ * get recorded as a mistake. A token that matches a word further back is a
+ * candidate for a deliberate restart (rewind); the tracker confirms it with the
+ * following token before moving the cursor.
  */
 export function alignToken(
   token: string,
@@ -124,6 +128,7 @@ export function alignToken(
 ): Alignment {
   const lookAhead = opts.lookAhead ?? 4;
   const lookBack = opts.lookBack ?? 2;
+  const maxRewind = opts.maxRewind ?? 30;
   const none: Alignment = { kind: 'none', offset: 0, span: 0, score: 0 };
 
   if (!token || cursor >= expected.length) return none;
@@ -147,10 +152,22 @@ export function alignToken(
 
   if (best) return best;
 
-  for (let back = Math.max(0, cursor - lookBack); back < cursor; back++) {
+  // An immediate stutter is not a restart: ignore it quietly.
+  const repeatFloor = Math.max(0, cursor - lookBack);
+  for (let back = cursor - 1; back >= repeatFloor; back--) {
     if (wordScore(token, expected[back]) >= 0.99) {
       return { kind: 'repeat', offset: back - cursor, span: 1, score: 1 };
     }
+  }
+
+  // Further back: the reader may have stopped and started again from an
+  // earlier word. Return the nearest exact-ish match; the tracker waits for a
+  // second consecutive token before committing to the rewind.
+  const rewindFloor = Math.max(0, cursor - maxRewind);
+  for (let back = repeatFloor - 1; back >= rewindFloor; back--) {
+    const match = matchAt(token, expected.slice(back));
+    if (!match || match.score < 0.9) continue;
+    return { kind: 'rewind', offset: back - cursor, span: match.span, score: match.score };
   }
 
   return none;

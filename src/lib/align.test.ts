@@ -94,4 +94,34 @@ describe('alignment', () => {
       score: 0,
     });
   });
+
+  it('marks a word further back as a possible restart', () => {
+    const words = ['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح'];
+    expect(alignToken('د', words, 7)).toMatchObject({
+      kind: 'rewind',
+      offset: -4,
+      span: 1,
+      score: 1,
+    });
+  });
+
+  it('still ignores an immediate stutter', () => {
+    const words = ['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'ح'];
+    expect(alignToken('هـ', words, 6)).toMatchObject({
+      kind: 'repeat',
+      offset: -2,
+    });
+  });
+
+  it('prefers a forward match over a repeated earlier word', () => {
+    expect(alignToken('قل', ['قل', 'هو', 'الله', 'قل'], 0)).toMatchObject({
+      kind: 'match',
+      offset: 0,
+    });
+  });
+
+  it('does not rewind on a fuzzy earlier match', () => {
+    const words = ['قل', 'هو', 'الرحمن', 'أحد', 'و', 'ز'];
+    expect(alignToken('الرحمان', words, 5).kind).toBe('none');
+  });
 });

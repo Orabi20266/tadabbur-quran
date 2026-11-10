@@ -120,6 +120,7 @@ export function Reader() {
   const errorsRef = useRef(0);
   const wordsRef = useRef(0);
   const ayahsRef = useRef(0);
+  const revealedRef = useRef<Record<string, boolean>>({});
   const ayahCountRef = useRef<Record<number, number>>({});
   const doneSetRef = useRef<Set<number>>(new Set());
   const toastTimer = useRef<number | null>(null);
@@ -176,6 +177,7 @@ export function Reader() {
       errorsRef.current = 0;
       wordsRef.current = 0;
       ayahsRef.current = 0;
+      revealedRef.current = {};
       ayahCountRef.current = {};
       doneSetRef.current = new Set();
       setErrors(0);
@@ -238,20 +240,26 @@ export function Reader() {
       const text = wordsOf(word.surah, word.ayah)[word.index] ?? '';
       setStatuses((prev) => ({ ...prev, [word.key]: type }));
 
-      const seen = (ayahCountRef.current[word.ayah] ?? 0) + 1;
-      ayahCountRef.current[word.ayah] = seen;
-      if (
-        seen === wordsOf(word.surah, word.ayah).length &&
-        !doneSetRef.current.has(word.ayah)
-      ) {
-        doneSetRef.current.add(word.ayah);
-        ayahsRef.current = doneSetRef.current.size;
-        showToast(`أتممت الآية ${arabicNumber(word.ayah)}`);
-      }
+      // Replaying an earlier word must not inflate word/ayah counts; it only
+      // refreshes that word's status and clears its active session mistake.
+      const firstCorrect = type === 'correct' && !revealedRef.current[word.key];
 
       if (type === 'correct') {
-        wordsRef.current += 1;
-        setRevealed((prev) => ({ ...prev, [word.key]: true }));
+        if (firstCorrect) {
+          revealedRef.current[word.key] = true;
+          wordsRef.current += 1;
+          const seen = (ayahCountRef.current[word.ayah] ?? 0) + 1;
+          ayahCountRef.current[word.ayah] = seen;
+          if (
+            seen === wordsOf(word.surah, word.ayah).length &&
+            !doneSetRef.current.has(word.ayah)
+          ) {
+            doneSetRef.current.add(word.ayah);
+            ayahsRef.current = doneSetRef.current.size;
+            showToast(`أتممت الآية ${arabicNumber(word.ayah)}`);
+          }
+        }
+        setRevealed((prev) => (prev[word.key] ? prev : { ...prev, [word.key]: true }));
       } else {
         errorsRef.current += 1;
         setErrors(errorsRef.current);

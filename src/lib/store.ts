@@ -156,10 +156,23 @@ export function recordEvent(args: RecordEventArgs): Mistake | null {
     };
   }
 
+  let mistakes = state.mistakes;
+  if (mistake) {
+    mistakes = [...mistakes, mistake].slice(-5000);
+  } else if (isCorrect && args.sessionId) {
+    // Re-reciting a word correctly in the same session resolves its active
+    // mistake. It stays in wordStats (and can be restored from word history).
+    mistakes = mistakes.map((m) =>
+      !m.removed && m.sessionId === args.sessionId && m.wordKey === args.wordKey
+        ? { ...m, removed: true }
+        : m,
+    );
+  }
+
   setState({
     ...state,
     wordStats: { ...state.wordStats, [args.wordKey]: nextStat },
-    mistakes: mistake ? [...state.mistakes, mistake].slice(-5000) : state.mistakes,
+    mistakes,
   });
   return mistake;
 }

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e6b4a" />
+    <meta name="description" content="تدبّر — حفظ القرآن بالتلاوة من الذاكرة وتتبّع الأخطاء" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="preload" href="./fonts/amiri-quran-arabic-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./fonts/ibm-plex-sans-arabic-arabic-400.woff2" as="font" type="font/woff2" crossorigin />
+    <title>تدبّر — رفيق الحفظ</title>
+    <script>
+      try {
+        const saved = JSON.parse(localStorage.getItem('tadabbur.v1') || 'null');
+        const theme = saved?.settings?.theme || 'system';
+        const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

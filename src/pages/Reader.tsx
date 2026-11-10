@@ -1,0 +1,889 @@
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+  ArrowRight,
+  ChevronLeft,
+  ChevronsLeft,
+  Eye,
+  EyeOff,
+  Keyboard,
+  ListChecks,
+  Mic,
+  MicOff,
+  Pause,
+  Play,
+  Settings2,
+  SkipForward,
+  Sparkles,
+  Square,
+} from 'lucide-react';
+import {
+  endSession,
+  getState,
+  highlightLevel,
+  recordEvent,
+  removeMistake,
+  restoreMistake,
+  setLastRead,
+  todayKey,
+  uid,
+  updateSettings,
+  useApp,
+} from '../lib/store';
+import {
+  arabicNumber,
+  getSurah,
+  normalizeArabic,
+  surahs,
+  wordKey,
+  wordsForRange,
+  wordsOf,
+} from '../lib/quran';
+import type {
+  DetectorWord,
+  EventType,
+  Session,
+  SpeechEngine,
+  WordStatus,
+} from '../lib/types';
+import { TranscriptTracker } from '../lib/tracker';
+import type { TrackerMeta } from '../lib/tracker';
+import { useSpeech } from '../lib/useSpeech';
+import { Sheet } from '../components/Sheet';
+import { WordSpan } from '../components/WordSpan';
+import { WordHistoryPanel } from '../components/WordHistoryPanel';
+import { MistakesList } from '../components/MistakesList';
+
+const PAGE = 5;
+
+interface Summary {
+  words: number;
+  ayahs: number;
+  errors: number;
+  minutes: number;
+  sessionId: string;
+}
+
+export function Reader() {
+  const { surah: surahParam } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  const surah = Math.min(114, Math.max(1, Number(surahParam) || 1));
+  const sData = getSurah(surah);
+  const ayahParam = Math.min(
+    sData.total_verses,
+    Math.max(1, Number(searchParams.get('ayah')) || 1),
+  );
+  const from = ayahParam;
+  const to = Math.min(sData.total_verses, from + PAGE - 1);
+
+  const settings = useApp((s) => s.settings);
+  const wordStats = useApp((s) => s.wordStats);
+  const allMistakes = useApp((s) => s.mistakes);
+
+  const [phase, setPhase] = useState<'read' | 'live'>('read');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [statuses, setStatuses] = useState<Record<string, WordStatus>>({});
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState(0);
+  const [blockedWord, setBlockedWord] = useState<DetectorWord | null>(null);
+  const [cursor, setCursor] = useState(0);
+  const [mistakesOpen, setMistakesOpen] = useState(false);
+  const [historyWord, setHistoryWord] = useState<string | null>(null);
+  const [navOpen, setNavOpen] = useState(false);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [engine, setEngine] = useState<SpeechEngine>(settings.speechEngine);
+  const [consentOpen, setConsentOpen] = useState(false);
+
+  const trackerRef = useRef<TranscriptTracker | null>(null);
+  const pausedRef = useRef(false);
+  const handleTokens = useCallback((tokens: string[]) => {
+    if (pausedRef.current) return;
+    trackerRef.current?.feed(tokens);
+  }, []);
+  const {
+    status: speechStatus,
+    heard,
+    supported: speechSupported,
+    start: startSpeech,
+    stop: stopSpeech,
+  } = useSpeech(handleTokens);
+
+  const engineRef = useRef<SpeechEngine>(settings.speechEngine);
+  const sessionIdRef = useRef<string | null>(null);
+  const startedAtRef = useRef(0);
+  const errorsRef = useRef(0);
+  const wordsRef = useRef(0);
+  const ayahsRef = useRef(0);
+  const ayahCountRef = useRef<Record<number, number>>({});
+  const doneSetRef = useRef<Set<number>>(new Set());
+  const toastTimer = useRef<number | null>(null);
+  const autoStarted = useRef(false);
+  const eventRef = useRef<
+    (w: DetectorWord, t: EventType, meta?: TrackerMeta) => void
+  >(() => {});
+  const doneRef = useRef<() => void>(() => {});
+  const finishRef = useRef<() => void>(() => {});
+  const viewRef = useRef({ surah, from, to, hidden });
+  viewRef.current = { surah, from, to, hidden };
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  useEffect(() => {
+    if (phase === 'read') setLastRead(surah, ayahParam);
+  }, [phase, surah, ayahParam]);
+
+  const goAyah = (n: number) => {
+    if (phase === 'live') return;
+    const next = Math.min(sData.total_verses, Math.max(1, n));
+    const params = new URLSearchParams(searchParams);
+    params.set('ayah', String(next));
+    params.delete('session');
+    setSearchParams(params, { replace: true });
+  };
+
+  const startSession = useCallback(
+    (requested?: SpeechEngine) => {
+      if (sessionIdRef.current) return;
+      const chosen = requested ?? settings.speechEngine;
+      // First live session: the reader chooses between browser speech (which
+      // may process audio in the cloud) and fully manual tracking.
+      if (!requested && !settings.speechConsent) {
+        setConsentOpen(true);
+        return;
+      }
+      if (requested) {
+        updateSettings({ speechEngine: requested, speechConsent: true });
+      }
+      engineRef.current = chosen;
+      setEngine(chosen);
+      setConsentOpen(false);
+      stopSpeech();
+
+      const id = uid();
+      sessionIdRef.current = id;
+      setSessionId(id);
+      startedAtRef.current = Date.now();
+      errorsRef.current = 0;
+      wordsRef.current = 0;
+      ayahsRef.current = 0;
+      ayahCountRef.current = {};
+      doneSetRef.current = new Set();
+      setErrors(0);
+      setStatuses({});
+      setRevealed({});
+      setSummary(null);
+      setBlockedWord(null);
+      setCursor(0);
+      pausedRef.current = false;
+      setPaused(false);
+      setHidden(true);
+      setLastSessionId(null);
+      setPhase('live');
+    },
+    [settings.speechConsent, settings.speechEngine, stopSpeech],
+  );
+
+  const finishSession = useCallback(() => {
+    const id = sessionIdRef.current;
+    if (!id) return;
+    trackerRef.current = null;
+    stopSpeech();
+    pausedRef.current = false;
+    const endedAt = Date.now();
+    const session: Session = {
+      id,
+      surah,
+      fromAyah: from,
+      toAyah: to,
+      startedAt: startedAtRef.current,
+      endedAt,
+      hidden,
+      wordsRevealed: wordsRef.current,
+      ayahsRevealed: ayahsRef.current,
+      mistakes: errorsRef.current,
+    };
+    endSession(session);
+    setLastSessionId(id);
+    setSummary({
+      words: wordsRef.current,
+      ayahs: ayahsRef.current,
+      errors: errorsRef.current,
+      minutes: Math.max(1, Math.round((endedAt - startedAtRef.current) / 60000)),
+      sessionId: id,
+    });
+    sessionIdRef.current = null;
+    setSessionId(null);
+    setPhase('read');
+    setPaused(false);
+    setBlockedWord(null);
+    setCursor(0);
+  }, [from, hidden, stopSpeech, surah, to]);
+
+  finishRef.current = finishSession;
+
+  const lastWordRef = useRef<DetectorWord | null>(null);
+
+  const onDetectorEvent = useCallback(
+    (word: DetectorWord, type: EventType, meta?: TrackerMeta) => {
+      const text = wordsOf(word.surah, word.ayah)[word.index] ?? '';
+      setStatuses((prev) => ({ ...prev, [word.key]: type }));
+
+      const seen = (ayahCountRef.current[word.ayah] ?? 0) + 1;
+      ayahCountRef.current[word.ayah] = seen;
+      if (
+        seen === wordsOf(word.surah, word.ayah).length &&
+        !doneSetRef.current.has(word.ayah)
+      ) {
+        doneSetRef.current.add(word.ayah);
+        ayahsRef.current = doneSetRef.current.size;
+        showToast(`أتممت الآية ${arabicNumber(word.ayah)}`);
+      }
+
+      if (type === 'correct') {
+        wordsRef.current += 1;
+        setRevealed((prev) => ({ ...prev, [word.key]: true }));
+      } else {
+        errorsRef.current += 1;
+        setErrors(errorsRef.current);
+      }
+
+      recordEvent({
+        sessionId: sessionIdRef.current,
+        surah: word.surah,
+        ayah: word.ayah,
+        wordIndex: word.index,
+        wordKey: word.key,
+        type,
+        correctText: text,
+        recitedText: meta?.recitedText,
+        confidence: meta?.confidence,
+      });
+    },
+    [showToast],
+  );
+
+  doneRef.current = () => {
+    if (sessionIdRef.current) finishRef.current();
+  };
+
+  // Tracker lifecycle for the live session. The cursor advances only when the
+  // recogniser reports a word; time and silence never move it.
+  useEffect(() => {
+    if (phase !== 'live' || !sessionId) return;
+    const words = wordsForRange(surah, from, to);
+    const normalized = words.map((w) =>
+      normalizeArabic(wordsOf(w.surah, w.ayah)[w.index] ?? ''),
+    );
+    const tracker = new TranscriptTracker({
+      words,
+      normalized,
+      detectMistakes: settings.detectMistakes,
+      dontProgressUntilFixed: settings.dontProgressUntilFixed,
+      onEvent: (w, t, meta) => eventRef.current(w, t, meta),
+      onBlocked: (b) => setBlockedWord(b ? lastWordRef.current : null),
+      onDone: () => doneRef.current(),
+      onCursor: (i) => setCursor(i),
+    });
+    trackerRef.current = tracker;
+    if (engineRef.current === 'browser' && !pausedRef.current) startSpeech();
+    return () => {
+      trackerRef.current = null;
+      stopSpeech();
+    };
+    // Session options are captured when the session starts on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, sessionId]);
+
+  const wrappedEvent = useCallback(
+    (w: DetectorWord, t: EventType, meta?: TrackerMeta) => {
+      lastWordRef.current = w;
+      onDetectorEvent(w, t, meta);
+    },
+    [onDetectorEvent],
+  );
+  eventRef.current = wrappedEvent;
+
+  // Auto-start when arriving from the dashboard CTA.
+  useEffect(() => {
+    if (searchParams.get('session') === '1' && !autoStarted.current) {
+      autoStarted.current = true;
+      void startSession();
+    }
+  }, [searchParams, startSession]);
+
+  useEffect(
+    () => () => {
+      trackerRef.current = null;
+      stopSpeech();
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+      // Leaving mid-session: keep the work instead of dropping it silently.
+      const id = sessionIdRef.current;
+      if (id && wordsRef.current > 0) {
+        const view = viewRef.current;
+        sessionIdRef.current = null;
+        endSession({
+          id,
+          surah: view.surah,
+          fromAyah: view.from,
+          toAyah: view.to,
+          startedAt: startedAtRef.current,
+          endedAt: Date.now(),
+          hidden: view.hidden,
+          wordsRevealed: wordsRef.current,
+          ayahsRevealed: ayahsRef.current,
+          mistakes: errorsRef.current,
+        });
+      }
+    },
+    [],
+  );
+
+  const togglePause = () => {
+    if (phase !== 'live') return;
+    if (paused) {
+      pausedRef.current = false;
+      setPaused(false);
+      if (engineRef.current === 'browser') startSpeech();
+    } else {
+      pausedRef.current = true;
+      setPaused(true);
+      stopSpeech();
+    }
+  };
+
+  const peekNext = () => {
+    if (phase !== 'live' || !sessionId) return;
+    const flat = wordsForRange(surah, from, to);
+    const position = trackerRef.current?.getCursor() ?? 0;
+    let target: DetectorWord | undefined = flat[position];
+    if (!target || revealed[target.key]) {
+      target = flat.find((w) => !revealed[w.key]);
+    }
+    if (!target) return;
+    peekWord(target);
+  };
+
+  const peekWord = (target: DetectorWord) => {
+    const text = wordsOf(target.surah, target.ayah)[target.index] ?? '';
+    setStatuses((prev) => ({ ...prev, [target.key]: 'peek' }));
+    setRevealed((prev) => ({ ...prev, [target.key]: true }));
+    errorsRef.current += 1;
+    setErrors(errorsRef.current);
+    recordEvent({
+      sessionId: sessionIdRef.current,
+      surah: target.surah,
+      ayah: target.ayah,
+      wordIndex: target.index,
+      wordKey: target.key,
+      type: 'peek',
+      correctText: text,
+    });
+    showToast('نظرة خاطفة — تُحتسب في سجلك');
+  };
+
+  const peekAyah = () => {
+    if (phase !== 'live') return;
+    const current = lastWordRef.current?.ayah ?? from;
+    wordsOf(surah, current).forEach((_, i) => {
+      const key = wordKey(surah, current, i);
+      if (revealed[key]) return;
+      peekWord({ key, surah, ayah: current, index: i });
+    });
+  };
+
+  const retryWord = () => {
+    trackerRef.current?.retry();
+    setBlockedWord(null);
+  };
+
+  const stepWord = () => {
+    if (phase !== 'live' || paused || blockedWord) return;
+    trackerRef.current?.step();
+  };
+
+  const retryMic = () => {
+    startSpeech();
+  };
+
+  const switchToManual = () => {
+    engineRef.current = 'manual';
+    setEngine('manual');
+    updateSettings({ speechEngine: 'manual', speechConsent: true });
+    stopSpeech();
+  };
+
+  const chooseEngine = (choice: SpeechEngine) => {
+    setConsentOpen(false);
+    startSession(choice);
+  };
+
+  const flatWords = useMemo(
+    () => wordsForRange(surah, from, to),
+    [surah, from, to],
+  );
+  const currentKey = phase === 'live' ? flatWords[cursor]?.key : undefined;
+
+  const closeHistory = () => setHistoryWord(null);
+
+  const scopeMistakes = useMemo(() => {
+    if (mistakesOpen) {
+      const scope = sessionId ?? lastSessionId;
+      if (scope) return allMistakes.filter((m) => m.sessionId === scope);
+      return allMistakes;
+    }
+    if (summary) return allMistakes.filter((m) => m.sessionId === summary.sessionId);
+    return [];
+  }, [allMistakes, mistakesOpen, sessionId, lastSessionId, summary]);
+
+  const today = todayKey();
+  const todaySessions = useApp((s) => s.sessions).filter(
+    (s) => new Date(s.startedAt).toISOString().slice(0, 10) === today,
+  );
+
+  const ayahs = [];
+  for (let a = from; a <= to; a++) ayahs.push(a);
+
+  const manualMode = engine === 'manual';
+  const speechUnavailable =
+    speechStatus === 'denied' ||
+    speechStatus === 'unsupported' ||
+    speechStatus === 'error';
+  const micOff = !manualMode && speechUnavailable;
+
+  let statusLabel: string;
+  if (paused) statusLabel = 'متوقفة مؤقتاً';
+  else if (manualMode) statusLabel = 'تتبّع يدوي — كلمة بعد كلمة';
+  else if (speechStatus === 'starting' || speechStatus === 'idle')
+    statusLabel = 'جارٍ تشغيل التعرّف الصوتي…';
+  else if (speechStatus === 'listening') statusLabel = 'تستمع إلى تلاوتك…';
+  else if (speechStatus === 'denied')
+    statusLabel = 'إذن الميكروفون مرفوض — التقدّم يدوي';
+  else if (speechStatus === 'unsupported')
+    statusLabel = 'التعرّف الصوتي غير متاح — التقدّم يدوي';
+  else statusLabel = 'تعذّر التعرّف الصوتي — التقدّم يدوي';
+
+  const stepDisabled =
+    paused ||
+    !!blockedWord ||
+    (!manualMode && (speechStatus === 'starting' || speechStatus === 'listening'));
+
+  return (
+    <div className="reader-shell">
+      <header className="reader-head">
+        <button className="icon-btn" onClick={() => navigate('/')} aria-label="رجوع">
+          <ArrowRight size={20} />
+        </button>
+        <button className="reader-title" onClick={() => setNavOpen(true)}>
+          <strong>{sData.name}</strong>
+          <small className="muted">
+            {phase === 'live' ? 'جلسة حفظ' : `الآيات ${arabicNumber(from)}–${arabicNumber(to)}`}
+          </small>
+        </button>
+        <Link className="icon-btn" to="/settings" aria-label="الإعدادات">
+          <Settings2 size={20} />
+        </Link>
+      </header>
+
+      {phase === 'live' ? (
+        <div
+          className={`session-strip${micOff ? ' is-mic-off' : ''}${
+            manualMode ? ' is-manual' : ''
+          }`}
+        >
+          <span
+            className={`live-dot${paused || manualMode ? ' is-paused' : ''}${
+              micOff ? ' is-off' : ''
+            }`}
+            aria-hidden
+          />
+          <span>{statusLabel}</span>
+          <span className="engine-badge">
+            {manualMode ? 'يدوي' : 'تعرّف المتصفح'}
+          </span>
+          <span className="spacer" />
+          <span className="mono">{arabicNumber(errors)} خطأ</span>
+        </div>
+      ) : (
+        <div className="page-nav">
+          <button
+            className="icon-btn"
+            onClick={() => goAyah(from - PAGE)}
+            disabled={from <= 1}
+            aria-label="الآيات السابقة"
+          >
+            <ChevronLeft size={20} style={{ transform: 'scaleX(-1)' }} />
+          </button>
+          <div className="page-dots" aria-hidden>
+            {Array.from({ length: Math.min(sData.total_verses, 7) }).map((_, i) => {
+              const target = Math.max(1, Math.min(sData.total_verses, from - 6 + i));
+              return (
+                <span key={i} className={target >= from && target <= to ? 'on' : ''} />
+              );
+            })}
+          </div>
+          <button
+            className="icon-btn"
+            onClick={() => goAyah(to + 1)}
+            disabled={to >= sData.total_verses}
+            aria-label="الآيات التالية"
+          >
+            <ChevronLeft size={20} />
+          </button>
+        </div>
+      )}
+
+      {phase === 'live' && !manualMode && heard ? (
+        <div className="heard-line" dir="rtl">
+          <span className="muted small">سمعنا:</span>
+          <span>{heard}</span>
+        </div>
+      ) : null}
+
+      {phase === 'live' && manualMode ? (
+        <div className="mode-banner">
+          <Keyboard size={17} aria-hidden />
+          <span>
+            التتبّع اليدوي: اضغط «الكلمة التالية» بعد كل كلمة تقرؤها. لا يتقدّم
+            التتبّع من تلقاء نفسه.
+          </span>
+        </div>
+      ) : null}
+
+      {phase === 'live' && micOff ? (
+        <div className="mic-banner" role="alert">
+          <MicOff size={17} aria-hidden />
+          <span>
+            {speechStatus === 'denied'
+              ? 'لم نتمكن من الوصول إلى الميكروفون — لن يتقدّم التتبّع من تلقاء نفسه.'
+              : speechStatus === 'unsupported'
+                ? 'التعرّف الصوتي غير متاح في هذا المتصفح — لن يتقدّم التتبّع من تلقاء نفسه.'
+                : 'تعذّر التعرّف الصوتي الآن — لن يتقدّم التتبّع من تلقاء نفسه.'}{' '}
+            يمكنك المتابعة بالتتبّع اليدوي: كلمة واحدة لكل ضغطة.
+          </span>
+          <div className="banner-actions">
+            <button className="btn btn-sm btn-secondary" onClick={retryMic}>
+              إعادة المحاولة
+            </button>
+            <button className="btn btn-sm btn-primary" onClick={switchToManual}>
+              التتبّع اليدوي
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {blockedWord ? (
+        <div className="block-banner" role="alert">
+          <span>
+            توقّفنا عند كلمة «{wordsOf(blockedWord.surah, blockedWord.ayah)[blockedWord.index]}»
+            — أعد تلاوتها ثم تابع.
+          </span>
+          <button className="btn btn-sm btn-primary" onClick={retryWord}>
+            أعدت تلاوتها
+          </button>
+        </div>
+      ) : null}
+
+      <main className="mushaf-wrap">
+        <article
+          className={`mushaf${hidden && phase === 'live' ? ' is-hidden-mode' : ''}`}
+          style={{ fontSize: `${settings.fontSize}px` }}
+          aria-label={`سورة ${sData.name}`}
+        >
+          {surah !== 1 && surah !== 9 ? (
+            <p className="bismillah">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</p>
+          ) : null}
+
+          {ayahs.map((a) => (
+            <div className="ayah" id={`ayah-${a}`} key={a}>
+              {wordsOf(surah, a).map((w, i) => {
+                const key = wordKey(surah, a, i);
+                const status = statuses[key] ?? 'neutral';
+                const hist = settings.highlightHistory
+                  ? highlightLevel(wordStats[key])
+                  : 'none';
+                const isHidden =
+                  phase === 'live' &&
+                  hidden &&
+                  !revealed[key] &&
+                  !(
+                    settings.showForHiddenWords &&
+                    (status === 'wrong' || status === 'tashkeel')
+                  );
+                return (
+                  <Fragment key={key}>
+                    <WordSpan
+                      text={w}
+                      status={status}
+                      hidden={isHidden}
+                      history={hist}
+                      active={lastWordRef.current?.key === key}
+                      current={currentKey === key}
+                      interactive
+                      onOpen={() => setHistoryWord(key)}
+                    />{' '}
+                  </Fragment>
+                );
+              })}
+              {settings.hideAyahMarkers && phase === 'live' ? null : (
+                <span className="ayah-marker" aria-label={`الآية ${a}`}>
+                  {arabicNumber(a)}
+                </span>
+              )}
+            </div>
+          ))}
+        </article>
+
+        <div className="mushaf-foot">
+          <span className="muted small">
+            {phase === 'live' && hidden
+              ? settings.showForHiddenWords
+                ? 'الآيات مخفية — تظليل الأخطاء ظاهر'
+                : 'الآيات مخفية — استرجعها من ذاكرتك'
+              : 'اضغط أي كلمة لعرض سجلها'}
+          </span>
+          {phase === 'live' ? (
+            <button className="link-btn" onClick={() => setHidden((h) => !h)}>
+              {hidden ? <Eye size={15} /> : <EyeOff size={15} />}
+              {hidden ? 'أظهر الآيات' : 'أخفِ الآيات'}
+            </button>
+          ) : null}
+        </div>
+      </main>
+
+      <footer className={`reader-bar${phase === 'live' ? ' is-live' : ''}`}>
+        {phase === 'read' ? (
+          <>
+            <button
+              className="icon-btn"
+              onClick={() => {
+                setLastSessionId(null);
+                setMistakesOpen(true);
+              }}
+              aria-label="سجل الأخطاء"
+            >
+              <ListChecks size={21} />
+            </button>
+            <button className="mic-btn" onClick={() => void startSession()}>
+              <Mic size={26} aria-hidden />
+              <span>تلاوة من الذاكرة</span>
+            </button>
+            <button
+              className={`icon-btn${hidden ? ' is-on' : ''}`}
+              onClick={() => setHidden((h) => !h)}
+              aria-label={hidden ? 'إظهار الآيات' : 'إخفاء الآيات'}
+            >
+              {hidden ? <Eye size={21} /> : <EyeOff size={21} />}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="icon-btn"
+              onClick={() => setMistakesOpen(true)}
+              aria-label={`الأخطاء ${errors}`}
+            >
+              <span className="counter">{arabicNumber(errors)}</span>
+            </button>
+            <button
+              className="icon-btn"
+              onClick={stepWord}
+              disabled={stepDisabled}
+              aria-label="الكلمة التالية يدوياً"
+              title="الكلمة التالية يدوياً"
+            >
+              <SkipForward size={21} />
+            </button>
+            <button className="icon-btn" onClick={peekNext} aria-label="اكشف الكلمة التالية">
+              <ChevronLeft size={22} />
+            </button>
+            <button className="icon-btn" onClick={peekAyah} aria-label="اكشف بقية الآية">
+              <ChevronsLeft size={22} />
+            </button>
+            <button
+              className="mic-btn is-live"
+              onClick={togglePause}
+              aria-label={paused ? 'متابعة' : 'إيقاف مؤقت'}
+            >
+              {paused ? <Play size={26} /> : <Pause size={26} />}
+              <span>{paused ? 'متابعة' : 'إيقاف'}</span>
+            </button>
+            <button className="icon-btn danger" onClick={() => finishRef.current()} aria-label="إنهاء الجلسة">
+              <Square size={19} />
+            </button>
+          </>
+        )}
+      </footer>
+
+      {toast ? (
+        <div className="toast" role="status">
+          <Sparkles size={16} /> {toast}
+        </div>
+      ) : null}
+
+      <Sheet
+        open={consentOpen}
+        title="كيف نتبّع تلاوتك؟"
+        onClose={() => setConsentOpen(false)}
+      >
+        <div className="consent">
+          <p>
+            التتبّع الصوتي يستخدم محرّك التعرّف في متصفحك. قد يعالج المتصفح الصوت
+            في خدمة سحابية تابعة لمزوّده؛ <strong>تدبّر لا يسجّل صوتك ولا يخزّنه</strong>،
+            ولا يحفظ إلا الكلمات التي تعرّف عليها.
+          </p>
+          <p className="muted small">
+            لا يتقدّم التتبّع بالمؤقّت أو الصمت: كل كلمة تُفتح فقط عندما يسمعها
+            المحرّك. وإن تعذّر الميكروفون، تضغط «الكلمة التالية» بعد كل كلمة.
+          </p>
+          <button
+            className="btn btn-primary wide"
+            onClick={() => chooseEngine('browser')}
+            disabled={!speechSupported}
+          >
+            <Mic size={18} aria-hidden /> استخدم التعرّف الصوتي
+          </button>
+          {!speechSupported ? (
+            <p className="muted small center">
+              هذا المتصفح لا يوفّر التعرّف الصوتي، لذا سيعمل التتبّع اليدوي فقط.
+            </p>
+          ) : null}
+          <button
+            className="btn btn-secondary wide"
+            onClick={() => chooseEngine('manual')}
+          >
+            <Keyboard size={18} aria-hidden /> التتبّع اليدوي
+          </button>
+          <p className="muted small center">
+            يمكنك تغيير الاختيار لاحقاً من الإعدادات أو أثناء الجلسة.
+          </p>
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={mistakesOpen}
+        title={sessionId || lastSessionId ? 'أخطاء الجلسة' : 'سجل الأخطاء'}
+        onClose={() => setMistakesOpen(false)}
+      >
+        <MistakesList
+          mistakes={scopeMistakes}
+          onRemove={removeMistake}
+          onRestore={restoreMistake}
+          onOpenWord={(m) => {
+            setMistakesOpen(false);
+            setHistoryWord(m.wordKey);
+          }}
+        />
+      </Sheet>
+
+      <Sheet
+        open={!!historyWord}
+        title="سجل الكلمة"
+        onClose={closeHistory}
+      >
+        {historyWord ? (
+          <WordHistoryPanel
+            wordKey={historyWord}
+            onRemove={removeMistake}
+            onRestore={restoreMistake}
+          />
+        ) : null}
+      </Sheet>
+
+      <Sheet open={navOpen} title="انتقل إلى" onClose={() => setNavOpen(false)}>
+        <div className="nav-form">
+          <label>
+            السورة
+            <select
+              value={surah}
+              onChange={(e) => navigate(`/read/${e.target.value}?ayah=1`)}
+            >
+              {surahs.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.id}. {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            الآية
+            <input
+              type="number"
+              min={1}
+              max={sData.total_verses}
+              value={from}
+              onChange={(e) => goAyah(Number(e.target.value) || 1)}
+            />
+          </label>
+        </div>
+        <p className="muted small">اختر السورة ثم الآية. يمكنك أيضاً استخدام صفحة الحفظ.</p>
+      </Sheet>
+
+      <Sheet
+        open={!!summary}
+        title="خلاصة الجلسة"
+        onClose={() => setSummary(null)}
+        footer={
+          <div className="row">
+            <button className="btn btn-ghost" onClick={() => setSummary(null)}>
+              تم
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setSummary(null);
+                void startSession();
+              }}
+            >
+              جلسة أخرى
+            </button>
+          </div>
+        }
+      >
+        {summary ? (
+          <div className="summary">
+            <div className="stat-grid">
+              <div className="stat">
+                <strong>{arabicNumber(summary.ayahs)}</strong>
+                <span>آية أُتمّت</span>
+              </div>
+              <div className="stat">
+                <strong>{arabicNumber(summary.words)}</strong>
+                <span>كلمة صحيحة</span>
+              </div>
+              <div className="stat is-bad">
+                <strong>{arabicNumber(summary.errors)}</strong>
+                <span>خطأ</span>
+              </div>
+              <div className="stat">
+                <strong>{arabicNumber(summary.minutes)}</strong>
+                <span>دقيقة</span>
+              </div>
+            </div>
+            <button
+              className="btn btn-secondary wide"
+              onClick={() => {
+                setMistakesOpen(true);
+                setSummary(null);
+              }}
+            >
+              راجع أخطاء هذه الجلسة
+            </button>
+            <p className="muted small center">
+              اليوم: {todaySessions.length} جلسة · سلسلة {getState().streak.current} يوم
+            </p>
+          </div>
+        ) : null}
+      </Sheet>
+    </div>
+  );
+}

@@ -187,9 +187,11 @@ export function Reader() {
       // The session owns its starting ayah. Everything before it is outside the
       // word list, so it can never be marked as a skipped word or a mistake.
       setSessionStart(startAt);
-      if (startAt !== ayahParam) {
+      if (startAt !== ayahParam || searchParams.has('session')) {
         const params = new URLSearchParams(searchParams);
         params.set('ayah', String(startAt));
+        // The link's one-shot auto-start is consumed; a reload should not
+        // reopen the start sheet.
         params.delete('session');
         setSearchParams(params, { replace: true });
       }
@@ -386,9 +388,12 @@ export function Reader() {
   useEffect(() => {
     if (searchParams.get('session') === '1' && !autoStarted.current) {
       autoStarted.current = true;
-      void startSession();
+      // The reader still chooses where to begin; the sheet opens on the ayah
+      // carried by the link and can be changed before anything is tracked.
+      setStartAyah(ayahParam);
+      setStartOpen(true);
     }
-  }, [searchParams, startSession]);
+  }, [ayahParam, searchParams]);
 
   useEffect(
     () => () => {

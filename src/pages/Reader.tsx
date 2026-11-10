@@ -48,6 +48,7 @@ import type {
 } from '../lib/types';
 import { TranscriptTracker } from '../lib/tracker';
 import type { TrackerMeta } from '../lib/tracker';
+import { playMistakeSound, primeMistakeSound } from '../lib/sound';
 import { useSpeech } from '../lib/useSpeech';
 import { Sheet } from '../components/Sheet';
 import { WordSpan } from '../components/WordSpan';
@@ -75,8 +76,6 @@ export function Reader() {
     sData.total_verses,
     Math.max(1, Number(searchParams.get('ayah')) || 1),
   );
-  const from = ayahParam;
-  const to = Math.min(sData.total_verses, from + PAGE - 1);
 
   const settings = useApp((s) => s.settings);
   const wordStats = useApp((s) => s.wordStats);
@@ -98,7 +97,15 @@ export function Reader() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [engine, setEngine] = useState<SpeechEngine>(settings.speechEngine);
-  const [consentOpen, setConsentOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const [startAyah, setStartAyah] = useState(ayahParam);
+  const [sessionStart, setSessionStart] = useState<number | null>(null);
+
+  // A live session can begin at any ayah the reader picks. The page follows
+  // that ayah, so nothing before it is displayed, tracked or counted.
+  const from =
+    phase === 'live' && sessionStart !== null ? sessionStart : ayahParam;
+  const to = Math.min(sData.total_verses, from + PAGE - 1);
 
   const trackerRef = useRef<TranscriptTracker | null>(null);
   const pausedRef = useRef(false);
@@ -153,22 +160,39 @@ export function Reader() {
   };
 
   const startSession = useCallback(
-    (requested?: SpeechEngine) => {
+    (requested?: SpeechEngine, requestedStart?: number) => {
       if (sessionIdRef.current) return;
+      const startAt = Math.min(
+        sData.total_verses,
+        Math.max(1, requestedStart ?? ayahParam),
+      );
       const chosen = requested ?? settings.speechEngine;
-      // First live session: the reader chooses between browser speech (which
-      // may process audio in the cloud) and fully manual tracking.
+      // First live session: the reader chooses where to begin and how to be
+      // tracked. Speech recognition may process audio in the cloud.
       if (!requested && !settings.speechConsent) {
-        setConsentOpen(true);
+        setStartAyah(startAt);
+        setStartOpen(true);
         return;
       }
       if (requested) {
         updateSettings({ speechEngine: requested, speechConsent: true });
       }
+      // Unlock audio while we are still inside the user's gesture.
+      primeMistakeSound();
       engineRef.current = chosen;
       setEngine(chosen);
-      setConsentOpen(false);
+      setStartOpen(false);
       stopSpeech();
+
+      // The session owns its starting ayah. Everything before it is outside the
+      // word list, so it can never be marked as a skipped word or a mistake.
+      setSessionStart(startAt);
+      if (startAt !== ayahParam) {
+        const params = new URLSearchParams(searchParams);
+        params.set('ayah', String(startAt));
+        params.delete('session');
+        setSearchParams(params, { replace: true });
+      }
 
       const id = uid();
       sessionIdRef.current = id;
@@ -192,7 +216,15 @@ export function Reader() {
       setLastSessionId(null);
       setPhase('live');
     },
-    [settings.speechConsent, settings.speechEngine, stopSpeech],
+    [
+      ayahParam,
+      sData.total_verses,
+      searchParams,
+      setSearchParams,
+      settings.speechConsent,
+      settings.speechEngine,
+      stopSpeech,
+    ],
   );
 
   const finishSession = useCallback(() => {
@@ -240,6 +272,8 @@ export function Reader() {
       const text = wordsOf(word.surah, word.ayah)[word.index] ?? '';
       setStatuses((prev) => ({ ...prev, [word.key]: type }));
 
+      if (type === 'wrong' || type === 'tashkeel') playMistakeSound();
+
       // Replaying an earlier word must not inflate word/ayah counts; it only
       // refreshes that word's status and clears its active session mistake.
       const firstCorrect = type === 'correct' && !revealedRef.current[word.key];
@@ -265,6 +299,18 @@ export function Reader() {
         setErrors(errorsRef.current);
       }
 
+      // A word that is re-recited correctly resolves its active session
+      // mistake(s), so it must stop counting as an error too.
+      const resolved =
+        type === 'correct'
+          ? getState().mistakes.filter(
+              (m) =>
+                !m.removed &&
+                m.sessionId === sessionIdRef.current &&
+                m.wordKey === word.key,
+            ).length
+          : 0;
+
       recordEvent({
         sessionId: sessionIdRef.current,
         surah: word.surah,
@@ -276,6 +322,11 @@ export function Reader() {
         recitedText: meta?.recitedText,
         confidence: meta?.confidence,
       });
+
+      if (resolved > 0) {
+        errorsRef.current = Math.max(0, errorsRef.current - resolved);
+        setErrors(errorsRef.current);
+      }
     },
     [showToast],
   );
@@ -296,16 +347,26 @@ export function Reader() {
       words,
       normalized,
       detectMistakes: settings.detectMistakes,
-      dontProgressUntilFixed: settings.dontProgressUntilFixed,
+      // Mistakes are shown in red and announced with a tone; they never halt
+      // the session or hold the cursor.
+      dontProgressUntilFixed: false,
       onEvent: (w, t, meta) => eventRef.current(w, t, meta),
       onBlocked: (b) => setBlockedWord(b ? lastWordRef.current : null),
       onDone: () => doneRef.current(),
       onCursor: (i) => setCursor(i),
     });
     trackerRef.current = tracker;
+    if (import.meta.env.DEV) {
+      // Test hook for local verification only; stripped from production builds.
+      (window as unknown as { __tadabbur?: TranscriptTracker }).__tadabbur =
+        tracker;
+    }
     if (engineRef.current === 'browser' && !pausedRef.current) startSpeech();
     return () => {
       trackerRef.current = null;
+      if (import.meta.env.DEV) {
+        delete (window as unknown as { __tadabbur?: TranscriptTracker }).__tadabbur;
+      }
       stopSpeech();
     };
     // Session options are captured when the session starts on purpose.
@@ -431,8 +492,16 @@ export function Reader() {
   };
 
   const chooseEngine = (choice: SpeechEngine) => {
-    setConsentOpen(false);
-    startSession(choice);
+    const startAt = Math.min(
+      sData.total_verses,
+      Math.max(1, startAyah || ayahParam),
+    );
+    startSession(choice, startAt);
+  };
+
+  const openStart = () => {
+    setStartAyah(from);
+    setStartOpen(true);
   };
 
   const flatWords = useMemo(
@@ -494,7 +563,9 @@ export function Reader() {
         <button className="reader-title" onClick={() => setNavOpen(true)}>
           <strong>{sData.name}</strong>
           <small className="muted">
-            {phase === 'live' ? 'جلسة حفظ' : `الآيات ${arabicNumber(from)}–${arabicNumber(to)}`}
+            {phase === 'live'
+              ? `جلسة حفظ · الآيات ${arabicNumber(from)}–${arabicNumber(to)}`
+              : `الآيات ${arabicNumber(from)}–${arabicNumber(to)}`}
           </small>
         </button>
         <Link className="icon-btn" to="/settings" aria-label="الإعدادات">
@@ -623,10 +694,8 @@ export function Reader() {
                   phase === 'live' &&
                   hidden &&
                   !revealed[key] &&
-                  !(
-                    settings.showForHiddenWords &&
-                    (status === 'wrong' || status === 'tashkeel')
-                  );
+                  status !== 'wrong' &&
+                  status !== 'tashkeel';
                 return (
                   <Fragment key={key}>
                     <WordSpan
@@ -654,9 +723,7 @@ export function Reader() {
         <div className="mushaf-foot">
           <span className="muted small">
             {phase === 'live' && hidden
-              ? settings.showForHiddenWords
-                ? 'الآيات مخفية — تظليل الأخطاء ظاهر'
-                : 'الآيات مخفية — استرجعها من ذاكرتك'
+              ? 'الآيات مخفية — الكلمات الخاطئة تظهر بالأحمر'
               : 'اضغط أي كلمة لعرض سجلها'}
           </span>
           {phase === 'live' ? (
@@ -681,7 +748,7 @@ export function Reader() {
             >
               <ListChecks size={21} />
             </button>
-            <button className="mic-btn" onClick={() => void startSession()}>
+            <button className="mic-btn" onClick={openStart}>
               <Mic size={26} aria-hidden />
               <span>تلاوة من الذاكرة</span>
             </button>
@@ -739,26 +806,59 @@ export function Reader() {
       ) : null}
 
       <Sheet
-        open={consentOpen}
-        title="كيف نتبّع تلاوتك؟"
-        onClose={() => setConsentOpen(false)}
+        open={startOpen}
+        title="بدء جلسة حفظ"
+        onClose={() => setStartOpen(false)}
       >
         <div className="consent">
-          <p>
-            التتبّع الصوتي يستخدم محرّك التعرّف في متصفحك. قد يعالج المتصفح الصوت
-            في خدمة سحابية تابعة لمزوّده؛ <strong>تدبّر لا يسجّل صوتك ولا يخزّنه</strong>،
-            ولا يحفظ إلا الكلمات التي تعرّف عليها.
+          <div className="start-ayah">
+            <span className="range-copy">
+              <strong>ابدأ من الآية</strong>
+              <small className="muted">لن تُعدّ الآيات قبلها أخطاءً</small>
+            </span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={sData.total_verses}
+              value={startAyah || ''}
+              onChange={(e) =>
+                setStartAyah(e.target.value === '' ? 0 : Number(e.target.value))
+              }
+              aria-label="آية بداية الجلسة"
+            />
+          </div>
+          <p className="muted small">
+            تبدأ الجلسة من الآية{' '}
+            {arabicNumber(Math.min(sData.total_verses, Math.max(1, startAyah || ayahParam)))} إلى{' '}
+            {arabicNumber(
+              Math.min(
+                sData.total_verses,
+                Math.max(1, startAyah || ayahParam) + PAGE - 1,
+              ),
+            )}
+            . الآيات قبل آية البداية لا تُحتسب أخطاءً.
           </p>
+
+          {!settings.speechConsent ? (
+            <p>
+              التتبّع الصوتي يستخدم محرّك التعرّف في متصفحك. قد يعالج المتصفح الصوت
+              في خدمة سحابية تابعة لمزوّده؛{' '}
+              <strong>تدبّر لا يسجّل صوتك ولا يخزّنه</strong>، ولا يحفظ إلا الكلمات
+              التي تعرّف عليها.
+            </p>
+          ) : null}
           <p className="muted small">
             لا يتقدّم التتبّع بالمؤقّت أو الصمت: كل كلمة تُفتح فقط عندما يسمعها
             المحرّك. وإن تعذّر الميكروفون، تضغط «الكلمة التالية» بعد كل كلمة.
           </p>
+
           <button
             className="btn btn-primary wide"
             onClick={() => chooseEngine('browser')}
             disabled={!speechSupported}
           >
-            <Mic size={18} aria-hidden /> استخدم التعرّف الصوتي
+            <Mic size={18} aria-hidden /> ابدأ بالتعرّف الصوتي
           </button>
           {!speechSupported ? (
             <p className="muted small center">
@@ -769,10 +869,10 @@ export function Reader() {
             className="btn btn-secondary wide"
             onClick={() => chooseEngine('manual')}
           >
-            <Keyboard size={18} aria-hidden /> التتبّع اليدوي
+            <Keyboard size={18} aria-hidden /> ابدأ بالتتبّع اليدوي
           </button>
           <p className="muted small center">
-            يمكنك تغيير الاختيار لاحقاً من الإعدادات أو أثناء الجلسة.
+            يمكنك تغيير طريقة التتبّع لاحقاً من الإعدادات أو أثناء الجلسة.
           </p>
         </div>
       </Sheet>
@@ -849,7 +949,7 @@ export function Reader() {
               className="btn btn-primary"
               onClick={() => {
                 setSummary(null);
-                void startSession();
+                openStart();
               }}
             >
               جلسة أخرى

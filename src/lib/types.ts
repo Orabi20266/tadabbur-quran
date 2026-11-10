@@ -9,10 +9,8 @@ export interface Settings {
   fontSize: number;
   detectMistakes: boolean;
   detectTashkeel: boolean;
-  dontProgressUntilFixed: boolean;
   hideAyahMarkers: boolean;
   highlightHistory: boolean;
-  showForHiddenWords: boolean;
   errorRate: number;
   paceMs: number;
   goalAyahs: number;

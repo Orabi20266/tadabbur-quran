@@ -89,6 +89,15 @@ describe('TranscriptTracker', () => {
     expect(h.cursor()).toBe(1);
   });
 
+  it('does not re-count a flagged word when the reader moves past it', () => {
+    const h = makeTracker();
+    h.tracker.feed(['سيارة']);
+    h.tracker.feed([spoken[1]]);
+    expect(h.events.map((e) => e.type)).toEqual(['wrong', 'correct']);
+    expect(h.events.filter((e) => e.type === 'wrong')).toHaveLength(1);
+    expect(h.cursor()).toBe(2);
+  });
+
   it('ignores a stuttered previous word', () => {
     const h = makeTracker();
     h.tracker.feed([spoken[0]]);

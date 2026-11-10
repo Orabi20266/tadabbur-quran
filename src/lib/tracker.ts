@@ -149,8 +149,12 @@ export class TranscriptTracker {
 
     if (alignment.offset > 0) {
       for (let i = 0; i < alignment.offset; i++) {
-        const skipped = this.cfg.words[this.cursor + i];
+        const at = this.cursor + i;
+        const skipped = this.cfg.words[at];
         if (!skipped) break;
+        // The word already flagged stays red, but it must not be counted twice
+        // when the reader simply continues past it.
+        if (this.flagged === at) continue;
         this.emit(skipped, this.cfg.detectMistakes ? 'wrong' : 'correct');
       }
     }

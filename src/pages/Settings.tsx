@@ -159,8 +159,8 @@ export function Settings() {
       <section className="card settings-card">
         <h2 className="section-title">كشف الأخطاء</h2>
         <p className="muted small">
-          يطابق المحرّك ما سمعه مع كلمات الآية. يُعلَّم الخطأ عند سماع كلمة مختلفة،
-          أو عند تجاوز كلمة لم تُنطق (إن كان «لا تتقدّم حتى تصحّح» مطفأً).
+          يطابق المحرّك ما سمعه مع كلمات الآية. تُعلَّم الكلمة الخاطئة بالأحمر مع
+          نغمة تنبيه، ويستمر التتبّع دون توقّف.
         </p>
         <ToggleRow
           label="كشف أخطاء الكلمات"
@@ -174,13 +174,6 @@ export function Settings() {
           checked={false}
           onChange={() => {}}
           disabled
-        />
-        <ToggleRow
-          label="لا تتقدّم حتى تصحّح"
-          hint="يتوقف التتبّع عند الخطأ حتى تعيد تلاوة الكلمة"
-          checked={settings.dontProgressUntilFixed}
-          onChange={(v) => updateSettings({ dontProgressUntilFixed: v })}
-          disabled={!settings.detectMistakes}
         />
       </section>
 
@@ -197,12 +190,6 @@ export function Settings() {
           hint="عرض أنظف عند الحفظ"
           checked={settings.hideAyahMarkers}
           onChange={(v) => updateSettings({ hideAyahMarkers: v })}
-        />
-        <ToggleRow
-          label="إظهار التظليل مع الكلمات المخفية"
-          hint="يريك مواضع الخطأ دون كشف النص"
-          checked={settings.showForHiddenWords}
-          onChange={(v) => updateSettings({ showForHiddenWords: v })}
         />
         <label className="range-row">
           <span className="range-copy">

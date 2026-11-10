@@ -42,6 +42,8 @@ export class TranscriptTracker {
     span: number;
     token: string;
     score: number;
+    /** Tokens that neither continued the restart nor matched anything. */
+    misses: number;
   } | null = null;
 
   constructor(cfg: TranscriptTrackerConfig) {
@@ -102,8 +104,12 @@ export class TranscriptTracker {
     const alignment = alignToken(token, this.cfg.normalized, this.cursor);
     if (alignment.kind === 'none') {
       // A stray token inside a possible restart should not become a false
-      // mistake; keep waiting for the continuation token.
-      if (this.pendingRewind) return;
+      // mistake, but do not suppress mistakes forever either.
+      if (this.pendingRewind) {
+        this.pendingRewind.misses += 1;
+        if (this.pendingRewind.misses < 2) return;
+        this.pendingRewind = null;
+      }
       this.handleWrong(token);
       return;
     }
@@ -113,6 +119,7 @@ export class TranscriptTracker {
         span: alignment.span,
         token,
         score: alignment.score,
+        misses: 0,
       };
       return;
     }

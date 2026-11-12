@@ -1,4 +1,5 @@
-import { alignToken, matchAt } from './align';
+import { alignToken, matchAt, normalizeToken } from './align';
+import { tashkeelDiffers } from './quran';
 import type { DetectorWord, EventType } from './types';
 
 export interface TrackerMeta {
@@ -10,7 +11,14 @@ export interface TranscriptTrackerConfig {
   words: DetectorWord[];
   /** Normalised text of every word, same order and length as `words`. */
   normalized: string[];
+  /** Fully diacritized text of every word, same order as `normalized`. */
+  diacritized: string[];
   detectMistakes: boolean;
+  /**
+   * Compare harakat whenever the recogniser supplies diacritized tokens.
+   * Undiacritized tokens are never guessed at.
+   */
+  detectTashkeel: boolean;
   dontProgressUntilFixed: boolean;
   onEvent: (word: DetectorWord, type: EventType, meta?: TrackerMeta) => void;
   onBlocked: (blocked: boolean) => void;
@@ -80,8 +88,29 @@ export class TranscriptTracker {
     this.advanceCorrect(1);
   }
 
+  /**
+   * Record a harakat mistake on the current word and move on. Used when the
+   * recogniser cannot report vowels (the browser engine) and the reader taps
+   * the harakat button after reciting the word with a wrong vowel.
+   */
+  markTashkeel(): void {
+    if (this.done || this.blocked) return;
+    const word = this.cfg.words[this.cursor];
+    if (!word) return;
+    this.pendingRewind = null;
+    this.flagged = -1;
+    this.emit(word, 'tashkeel');
+    this.cursor += 1;
+    this.cfg.onCursor(this.cursor);
+    if (this.cursor >= this.cfg.normalized.length) this.finish();
+  }
+
   private handleToken(raw: string): void {
-    const token = raw.trim();
+    const heard = raw.trim();
+    if (!heard) return;
+    // Recognisers may return diacritized text; alignment works on letters and
+    // the original token is kept for the harakat check.
+    const token = normalizeToken(heard);
     if (!token) return;
     if (this.cursor >= this.cfg.normalized.length) {
       this.finish();
@@ -110,7 +139,7 @@ export class TranscriptTracker {
         if (this.pendingRewind.misses < 2) return;
         this.pendingRewind = null;
       }
-      this.handleWrong(token);
+      this.handleWrong(heard);
       return;
     }
     if (alignment.kind === 'repeat' || alignment.kind === 'rewind') {
@@ -163,7 +192,16 @@ export class TranscriptTracker {
     for (let i = 0; i < alignment.span; i++) {
       const word = this.cfg.words[start + i];
       if (!word) break;
-      this.emit(word, 'correct', { recitedText: token, confidence: alignment.score });
+      const harakatWrong =
+        this.cfg.detectTashkeel &&
+        start === this.cursor &&
+        alignment.span === 1 &&
+        i === 0 &&
+        tashkeelDiffers(heard, this.cfg.diacritized[start] ?? '');
+      this.emit(word, harakatWrong ? 'tashkeel' : 'correct', {
+        recitedText: heard,
+        confidence: alignment.score,
+      });
     }
 
     this.cursor = Math.min(

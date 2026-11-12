@@ -4,6 +4,7 @@ import {
   ArrowRight,
   ChevronLeft,
   ChevronsLeft,
+  CircleAlert,
   Eye,
   EyeOff,
   Keyboard,
@@ -276,12 +277,13 @@ export function Reader() {
 
       if (type === 'wrong' || type === 'tashkeel') playMistakeSound();
 
-      // Replaying an earlier word must not inflate word/ayah counts; it only
-      // refreshes that word's status and clears its active session mistake.
-      const firstCorrect = type === 'correct' && !revealedRef.current[word.key];
+      // A word recited with a wrong vowel still counts as recited: it moves the
+      // session forward, it just also records a mistake.
+      const countedType = type === 'correct' || type === 'tashkeel';
+      const firstCounted = countedType && !revealedRef.current[word.key];
 
-      if (type === 'correct') {
-        if (firstCorrect) {
+      if (countedType) {
+        if (firstCounted) {
           revealedRef.current[word.key] = true;
           wordsRef.current += 1;
           const seen = (ayahCountRef.current[word.ayah] ?? 0) + 1;
@@ -296,7 +298,8 @@ export function Reader() {
           }
         }
         setRevealed((prev) => (prev[word.key] ? prev : { ...prev, [word.key]: true }));
-      } else {
+      }
+      if (type !== 'correct') {
         errorsRef.current += 1;
         setErrors(errorsRef.current);
       }
@@ -345,10 +348,15 @@ export function Reader() {
     const normalized = words.map((w) =>
       normalizeArabic(wordsOf(w.surah, w.ayah)[w.index] ?? ''),
     );
+    const diacritized = words.map(
+      (w) => wordsOf(w.surah, w.ayah)[w.index] ?? '',
+    );
     const tracker = new TranscriptTracker({
       words,
       normalized,
+      diacritized,
       detectMistakes: settings.detectMistakes,
+      detectTashkeel: settings.detectTashkeel,
       // Mistakes are shown in red and announced with a tone; they never halt
       // the session or hold the cursor.
       dontProgressUntilFixed: false,
@@ -485,6 +493,11 @@ export function Reader() {
     trackerRef.current?.step();
   };
 
+  const markTashkeel = () => {
+    if (phase !== 'live' || paused || blockedWord) return;
+    trackerRef.current?.markTashkeel();
+  };
+
   const retryMic = () => {
     startSpeech();
   };
@@ -595,6 +608,18 @@ export function Reader() {
             {manualMode ? 'يدوي' : 'تعرّف المتصفح'}
           </span>
           <span className="spacer" />
+          {settings.detectTashkeel ? (
+            <button
+              className="chip-btn"
+              onClick={markTashkeel}
+              disabled={paused}
+              aria-label="تسجيل خطأ في حركة الكلمة الحالية"
+              title="حركة خاطئة — سجّلها وتابع"
+            >
+              <CircleAlert size={14} aria-hidden />
+              حركة
+            </button>
+          ) : null}
           <span className="mono">{arabicNumber(errors)} خطأ</span>
         </div>
       ) : (
@@ -728,7 +753,7 @@ export function Reader() {
         <div className="mushaf-foot">
           <span className="muted small">
             {phase === 'live' && hidden
-              ? 'الآيات مخفية — الكلمات الخاطئة تظهر بالأحمر'
+              ? 'الآيات مخفية — الأخطاء تظهر بالأحمر والحركات بالكهرماني'
               : 'اضغط أي كلمة لعرض سجلها'}
           </span>
           {phase === 'live' ? (

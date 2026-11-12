@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
-import { BookOpenText, History, House, Settings } from 'lucide-react';
+import { BookOpenText, GraduationCap, History, House, Settings } from 'lucide-react';
 
 const tabs = [
   { to: '/', label: 'الرئيسية', icon: House, end: true },
   { to: '/memorize', label: 'الحفظ', icon: BookOpenText },
+  { to: '/tajweed', label: 'التجويد', icon: GraduationCap },
   { to: '/activity', label: 'السجل', icon: History },
   { to: '/settings', label: 'الإعدادات', icon: Settings },
 ];

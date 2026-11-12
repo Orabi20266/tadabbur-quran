@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
-import { tokenizeTranscript } from './align';
+import { splitTranscript } from './align';
 
 export type SpeechStatus =
   | 'idle'
@@ -145,7 +145,7 @@ export function useSpeech(
         setHeard(transcript);
       }
 
-      const tokens = tokenizeTranscript(transcript);
+      const tokens = splitTranscript(transcript);
       // Never replay tokens from an older/shorter results list: replaying would
       // move the cursor over words the reader has not repeated.
       if (tokens.length < consumedRef.current) return;

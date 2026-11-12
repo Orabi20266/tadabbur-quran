@@ -42,6 +42,62 @@ export function sameWordDifferentTashkeel(a: string, b: string): boolean {
   return normalizeArabic(a) === normalizeArabic(b) && a !== b;
 }
 
+const HARAKAT = /[\u064b-\u065f\u0670\u06e1]/;
+const ARABIC_LETTER = /[\u0621-\u064a\u0671]/;
+const MARK = /[\u064b-\u065f\u0670\u06e1]/;
+
+/** True when the text carries at least one short-vowel mark. */
+export function hasTashkeel(text: string): boolean {
+  return HARAKAT.test(text);
+}
+
+function unifyLetter(ch: string): string {
+  return ch
+    .replace(/[\u0623\u0625\u0622\u0671]/g, '\u0627')
+    .replace(/\u0649/g, '\u064a')
+    .replace(/\u0624/g, '\u0648')
+    .replace(/\u0626/g, '\u064a')
+    .replace(/\u0629/g, '\u0647');
+}
+
+/**
+ * Canonical per-letter harakat signature, e.g. «قُلْ» → `قُ|لْ`.
+ *
+ * Marks are sorted inside each letter so shadda-before-fatha and
+ * fatha-before-shadda compare equal. Non-Arabic noise is ignored.
+ */
+export function tashkeelOf(text: string): string {
+  const out: string[] = [];
+  let marks: string[] = [];
+  const flush = () => {
+    if (!out.length) return;
+    const rank = (m: string) => (m === '\u0651' ? 0 : 1);
+    const sorted = [...new Set(marks)].sort((a, b) => rank(a) - rank(b));
+    out[out.length - 1] += sorted.join('');
+    marks = [];
+  };
+  for (const ch of text) {
+    if (ARABIC_LETTER.test(ch)) {
+      flush();
+      out.push(unifyLetter(ch));
+    } else if (MARK.test(ch)) {
+      // Quranic sukun (U+06E1) and the standard one are the same vowel state.
+      marks.push(ch === '\u06e1' ? '\u0652' : ch);
+    }
+  }
+  flush();
+  return out.join('|');
+}
+
+/**
+ * Compare the harakat actually heard with the expected word. Both sides must
+ * carry diacritics; undiacritized recogniser output is simply not judged.
+ */
+export function tashkeelDiffers(heard: string, expected: string): boolean {
+  if (!hasTashkeel(heard) || !hasTashkeel(expected)) return false;
+  return tashkeelOf(heard) !== tashkeelOf(expected);
+}
+
 export function wordsOf(surah: number, ayah: number): string[] {
   return ayahText(surah, ayah).split(/\s+/).filter(Boolean);
 }

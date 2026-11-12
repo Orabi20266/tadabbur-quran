@@ -15,12 +15,14 @@ function makeTracker(
     words?: DetectorWord[];
     dontProgressUntilFixed?: boolean;
     detectMistakes?: boolean;
+    detectTashkeel?: boolean;
   } = {},
 ) {
   const words = patch.words ?? wordsForRange(112, 1, 4);
-  const normalized = words.map((w) =>
-    normalizeArabic(wordsOf(w.surah, w.ayah)[w.index] ?? ''),
+  const texts = words.map(
+    (w) => wordsOf(w.surah, w.ayah)[w.index] ?? '',
   );
+  const normalized = texts.map((text) => normalizeArabic(text));
   const events: Event[] = [];
   let cursor = 0;
   let blocked = false;
@@ -29,7 +31,9 @@ function makeTracker(
   const tracker = new TranscriptTracker({
     words,
     normalized,
+    diacritized: texts,
     detectMistakes: patch.detectMistakes ?? true,
+    detectTashkeel: patch.detectTashkeel ?? true,
     dontProgressUntilFixed: patch.dontProgressUntilFixed ?? false,
     onEvent: (word, type, meta) => events.push({ key: word.key, type, meta }),
     onBlocked: (value) => {
@@ -96,6 +100,33 @@ describe('TranscriptTracker', () => {
     expect(h.events.map((e) => e.type)).toEqual(['wrong', 'correct']);
     expect(h.events.filter((e) => e.type === 'wrong')).toHaveLength(1);
     expect(h.cursor()).toBe(2);
+  });
+
+  it('flags harakat differences when the token is diacritized', () => {
+    const h = makeTracker();
+    h.tracker.feed(['قَلَ']);
+    expect(h.events.map((e) => e.type)).toEqual(['tashkeel']);
+    expect(h.cursor()).toBe(1);
+  });
+
+  it('accepts matching harakat', () => {
+    const h = makeTracker();
+    h.tracker.feed(['قُلۡ']);
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    expect(h.cursor()).toBe(1);
+  });
+
+  it('does not guess harakat from undiacritized tokens', () => {
+    const h = makeTracker();
+    h.tracker.feed([spoken[0]]);
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+  });
+
+  it('records a manual harakat mistake and advances', () => {
+    const h = makeTracker();
+    h.tracker.markTashkeel();
+    expect(h.events.map((e) => e.type)).toEqual(['tashkeel']);
+    expect(h.cursor()).toBe(1);
   });
 
   it('ignores a stuttered previous word', () => {

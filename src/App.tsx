@@ -7,6 +7,7 @@ import { Tracker } from './pages/Tracker';
 import { Activity } from './pages/Activity';
 import { Settings } from './pages/Settings';
 import { Onboarding } from './pages/Onboarding';
+import { Tajweed } from './pages/Tajweed';
 import { useApp } from './lib/store';
 
 function useTheme() {
@@ -60,6 +61,14 @@ function Shell() {
         element={
           <Layout>
             <Activity />
+          </Layout>
+        }
+      />
+      <Route
+        path="/tajweed"
+        element={
+          <Layout>
+            <Tajweed />
           </Layout>
         }
       />

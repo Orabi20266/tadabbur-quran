@@ -23,6 +23,19 @@ export function tokenizeTranscript(text: string): string[] {
     .filter((token) => token.length > 0);
 }
 
+/**
+ * Split a transcript without discarding diacritics, so an engine that reports
+ * harakat can be checked for vowel mistakes. Alignment normalises later.
+ */
+export function splitTranscript(text: string): string[] {
+  return text
+    .split(/\s+/)
+    .map((token) =>
+      token.replace(/[^\u0621-\u064A\u064B-\u065F\u0670\u06D6-\u06ED]/g, ''),
+    )
+    .filter((token) => token.length > 0);
+}
+
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (!a.length) return b.length;

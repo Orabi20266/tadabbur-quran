@@ -5,6 +5,8 @@ import {
   normalizeArabic,
   sameWordDifferentTashkeel,
   surahs,
+  tashkeelDiffers,
+  tashkeelOf,
   TOTAL_AYAHS,
   wordKey,
   wordsForRange,
@@ -67,6 +69,33 @@ describe('normalizeArabic', () => {
   it('detects tashkeel-only differences', () => {
     expect(sameWordDifferentTashkeel('عَلِمَ', 'عَلَّمَ')).toBe(true);
     expect(sameWordDifferentTashkeel('قل', 'قال')).toBe(false);
+  });
+});
+
+describe('tashkeel comparison', () => {
+  it('builds a per-letter harakat signature', () => {
+    expect(tashkeelOf('قُلْ')).toBe('قُ|لْ');
+    expect(tashkeelOf('قُلۡ')).toBe('قُ|لْ');
+  });
+
+  it('ignores mark order but keeps the vowel', () => {
+    const shaddaFirst = '\u0631\u0651\u064e\u062d\u064e\u0645\u064e';
+    const fathaFirst = '\u0631\u064e\u0651\u062d\u064e\u0645\u064e';
+    expect(tashkeelOf(shaddaFirst)).toBe(tashkeelOf(fathaFirst));
+  });
+
+  it('flags different vowels on the same letters', () => {
+    expect(tashkeelDiffers('قَلَ', 'قُلْ')).toBe(true);
+    expect(tashkeelDiffers('عَلِمَ', 'عَلَمَ')).toBe(true);
+  });
+
+  it('never guesses when a side has no diacritics', () => {
+    expect(tashkeelDiffers('قل', 'قُلْ')).toBe(false);
+    expect(tashkeelDiffers('قُلْ', 'قل')).toBe(false);
+  });
+
+  it('treats wasla and alef forms as the same letter', () => {
+    expect(tashkeelDiffers('اللَّهِ', 'ٱللَّهِ')).toBe(false);
   });
 });
 

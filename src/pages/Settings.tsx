@@ -159,8 +159,8 @@ export function Settings() {
       <section className="card settings-card">
         <h2 className="section-title">كشف الأخطاء</h2>
         <p className="muted small">
-          يطابق المحرّك ما سمعه مع كلمات الآية. تُعلَّم الكلمة الخاطئة بالأحمر مع
-          نغمة تنبيه، ويستمر التتبّع دون توقّف.
+          يطابق المحرّك ما سمعه مع كلمات الآية. تُعلَّم الكلمة الخاطئة بالأحمر وخطأ
+          الحركة بالكهرماني، مع نغمة تنبيه، ويستمر التتبّع دون توقّف.
         </p>
         <ToggleRow
           label="كشف أخطاء الكلمات"
@@ -170,10 +170,9 @@ export function Settings() {
         />
         <ToggleRow
           label="كشف أخطاء التشكيل"
-          hint="غير متاح: تعرّف المتصفح يعيد الكلمات دون حركات"
-          checked={false}
-          onChange={() => {}}
-          disabled
+          hint="تلقائي إذا أعاد المحرّك الحركات، أو سجّلها بزر «حركة» أثناء التلاوة"
+          checked={settings.detectTashkeel}
+          onChange={(v) => updateSettings({ detectTashkeel: v })}
         />
       </section>
 

@@ -7,6 +7,7 @@ import {
   tokenizeTranscript,
   wordScore,
 } from './align';
+import { tashkeelDiffers } from './quran';
 
 describe('transcript tokenization', () => {
   it('strips tashkeel, punctuation and latin noise', () => {
@@ -33,7 +34,35 @@ describe('word matching', () => {
   it('requires short particles to be the same word', () => {
     expect(wordScore('قل', 'قل')).toBe(1);
     expect(wordScore('من', 'عن')).toBe(0);
-    expect(wordScore('لم', 'ولم')).toBe(0);
+    expect(wordScore('قال', 'قل')).toBeGreaterThan(0.8);
+  });
+
+  it('accepts a dropped or added attached particle', () => {
+    // The recogniser freely drops the joined و/ف/ب/ل/ك: «وكأساً» becomes «كأس».
+    expect(wordScore('كاس', 'وكاسا')).toBeGreaterThan(0.8);
+    expect(wordScore('وبما', 'بما')).toBe(0); // too short to tell from another word
+    expect(wordScore('واليوم', 'اليوم')).toBeGreaterThan(0.8);
+    // But the word after the particle must still be the expected word.
+    expect(wordScore('كفر', 'وكاسا')).toBe(0);
+  });
+
+  it('accepts an assimilated final noon (idgham and iqlab)', () => {
+    // «مِن رَّبِّكَ» sounds like «مر ربك», «مِن بَعۡدِ» like «مم بعد».
+    expect(wordScore('مر', 'من')).toBeGreaterThan(0.8);
+    expect(wordScore('مم', 'من')).toBeGreaterThan(0.8);
+    expect(wordScore('مل', 'من')).toBeGreaterThan(0.8);
+    // A different word that merely ends in a noon target is still rejected.
+    expect(wordScore('مر', 'عن')).toBe(0);
+    expect(wordScore('مع', 'من')).toBe(0);
+  });
+
+  it('ignores a missing tanween (alef without the mark)', () => {
+    // Ikhfa and ordinary ASR output drop the final alef of «كأساً».
+    expect(wordScore('كاس', 'كاسا')).toBeGreaterThan(0.8);
+    expect(wordScore('دهاق', 'دهاقا')).toBeGreaterThan(0.8);
+    // The tanween never appears in normalised text, so this must not be a
+    // harakat mistake either.
+    expect(tashkeelDiffers('كَأْس', 'وَكَأۡسٗا')).toBe(false);
   });
 
   it('tolerates a recogniser confusion or an added long vowel', () => {

@@ -363,6 +363,23 @@ describe('TranscriptTracker', () => {
     expect(h.done()).toBe(true);
   });
 
+  it('tracks An-Naba 34 when ikhfa drops the tanween and the joined waw', () => {
+    const h = makeTracker({ words: wordsForRange(78, 34, 34) });
+    // The recogniser writes «كأساً دهاقاً» as «كأس دهاق»: no tanween, no و.
+    h.tracker.feed(['كأس', 'دهاق']);
+    expect(h.cursor()).toBe(2);
+    expect(h.events.map((e) => e.type)).toEqual(['correct', 'correct']);
+    expect(h.done()).toBe(true);
+  });
+
+  it('accepts an idgham noon the recogniser wrote as the next letter', () => {
+    const h = makeTracker({ words: wordsForRange(78, 35, 35) });
+    // «لَا يَسۡمَعُونَ فِيهَا لَغۡوٗا وَلَا كِذَّٰبٗا»
+    h.tracker.feed(['لا', 'يسمعون', 'فيها', 'لغو', 'ولا', 'كذاب']);
+    expect(h.cursor()).toBe(6);
+    expect(h.events.every((e) => e.type === 'correct')).toBe(true);
+  });
+
   it('still flags a word the reader really skipped', () => {
     const h = makeTracker({ words: wordsForRange(1, 1, 7) });
     h.tracker.feed([

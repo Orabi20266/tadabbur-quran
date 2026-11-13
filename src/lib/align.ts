@@ -135,16 +135,67 @@ export function phoneticSimilarity(a: string, b: string): number {
 }
 
 /**
+ * Attached particles the recogniser treats as separate or drops altogether.
+ * «وَكَأۡسٗا» is heard as «وكأس» or plain «كأس», and «وَلَمۡ» as «لم». The mushaf
+ * writes them joined, so a leading و/ف/ب/ل/ك is alignment noise, not a mistake.
+ */
+const JOINING_PARTICLE = new Set(['\u0648', '\u0641', '\u0628', '\u0644', '\u0643']);
+
+/**
  * Score one heard token against one expected word. Short particles need a
  * closer match than long words, but a single recogniser confusion (or a long
  * vowel the engine added) is still accepted: refusing those made ordinary
  * recitation look wrong.
- *
- * The first letter must still agree (up to a known confusion). Without that
- * guard «لم» would match «ولم» and an ordinary stutter would move the cursor.
  */
 export function wordScore(heard: string, expected: string): number {
   if (!heard || !expected) return 0;
+  if (heard === expected) return 1;
+
+  const direct = scorePair(heard, expected);
+  if (direct > 0) return direct;
+
+  const assimilated = assimilationScore(heard, expected);
+  if (assimilated > 0) return assimilated;
+
+  // A dropped or extra attached particle: «كأس» for «وكأسا». Only for
+  // words long enough that the particle is not the whole meaning: dropping the
+  // و of «ولم» or «وما» makes another real word, so those stay strict.
+  if (heard[0] !== expected[0]) {
+    let best = 0;
+    if (JOINING_PARTICLE.has(expected[0]) && expected.length >= 5) {
+      best = Math.max(best, scorePair(heard, expected.slice(1)));
+    }
+    if (JOINING_PARTICLE.has(heard[0]) && heard.length >= 5) {
+      best = Math.max(best, scorePair(heard.slice(1), expected));
+    }
+    return best;
+  }
+  return 0;
+}
+
+/**
+ * Noon sakinah and tanween are not pronounced as a plain noon: idgham and
+ * iqlab turn the final ن into the following letter («مِن رَّبِّكَ» → «مر ربك»)
+ * or into م. The reader is right; the recogniser just wrote the assimilated
+ * sound. Only the final letter may differ, and only to an idgham target, so a
+ * genuinely different word is still rejected.
+ */
+const IDGHAM_TARGETS = new Set(['\u0645', '\u0631', '\u0644', '\u0648', '\u064a', '\u0646']);
+
+function assimilationScore(heard: string, expected: string): number {
+  if (heard.length !== expected.length || expected.length < 2) return 0;
+  if (expected[expected.length - 1] !== '\u0646') return 0;
+  if (heard[heard.length - 1] === '\u0646') return 0;
+  if (!IDGHAM_TARGETS.has(heard[heard.length - 1])) return 0;
+  return heard.slice(0, -1) === expected.slice(0, -1) ? 0.9 : 0;
+}
+
+/**
+ * Compare two token skeletons. The first letter must agree (up to a known
+ * confusion) so a stutter or a different word cannot slip through on length
+ * alone.
+ */
+function scorePair(heard: string, expected: string): number {
   if (heard === expected) return 1;
   const longest = Math.max(heard.length, expected.length);
   if (longest <= 1) return 0;

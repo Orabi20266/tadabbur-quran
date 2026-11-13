@@ -56,7 +56,13 @@ describe('quran data', () => {
 describe('normalizeArabic', () => {
   it('strips tashkeel and quranic marks', () => {
     expect(normalizeArabic('ٱلۡحَمۡدُ')).toBe('الحمد');
-    expect(normalizeArabic('رَحۡمَٰن')).toBe('رحمن');
+    expect(normalizeArabic('رَحۡمَٰن')).toBe('رحمان');
+  });
+
+  it('keeps the Uthmani dagger alef as a written alif', () => {
+    expect(normalizeArabic('ٱلصِّرَٰطَ')).toBe('الصراط');
+    expect(normalizeArabic('ٱلۡعَٰلَمِينَ')).toBe('العالمين');
+    expect(normalizeArabic('مَٰلِكِ')).toBe('مالك');
   });
 
   it('unifies alef, yaa, taa marbuta and tatweel', () => {
@@ -96,6 +102,24 @@ describe('tashkeel comparison', () => {
 
   it('treats wasla and alef forms as the same letter', () => {
     expect(tashkeelDiffers('اللَّهِ', 'ٱللَّهِ')).toBe(false);
+  });
+
+  it('ignores a mark the recogniser simply did not write', () => {
+    // Browser engines often return «قُل» without the sukun; that is not a
+    // wrong vowel and must not be reported as a harakat mistake.
+    expect(tashkeelDiffers('قُل', 'قُلۡ')).toBe(false);
+    expect(tashkeelDiffers('قُلۡ', 'قُل')).toBe(false);
+    expect(tashkeelDiffers('اللَّه', 'ٱللَّهِ')).toBe(false);
+  });
+
+  it('still flags two explicit but different vowels', () => {
+    expect(tashkeelDiffers('قُلْ', 'قُلُ')).toBe(true);
+    expect(tashkeelDiffers('عَلِمَ', 'عَلَمَ')).toBe(true);
+  });
+
+  it('never compares vowels when the letters differ', () => {
+    // «الرحمن» and «الرحمان» are an alignment difference, not a vowel one.
+    expect(tashkeelDiffers('الرَّحْمَنُ', 'ٱلرَّحۡمَٰنُ')).toBe(false);
   });
 });
 

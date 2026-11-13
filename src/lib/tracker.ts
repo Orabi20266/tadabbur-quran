@@ -55,6 +55,12 @@ export class TranscriptTracker {
     /** Tokens that neither continued the restart nor matched anything. */
     misses: number;
   } | null = null;
+  /**
+   * An unrecognised token we have not yet turned into a mistake. One odd token
+   * is usually recogniser noise; only a second one in a row proves the reader is
+   * off the expected word.
+   */
+  private pendingUnknown: { token: string; count: number } | null = null;
 
   constructor(cfg: TranscriptTrackerConfig) {
     this.cfg = cfg;
@@ -86,8 +92,27 @@ export class TranscriptTracker {
   /** Reader confirmed the flagged word; release the hold and move past it. */
   retry(): void {
     if (this.done || !this.blocked) return;
+    this.pendingUnknown = null;
     this.setBlocked(false);
     this.advanceCorrect(1);
+  }
+
+  /**
+   * Move the tracking cursor to a word the reader chose, without claiming any
+   * word was recited. Used when recognition loses its place and the reader taps
+   * «تابع من هذه الكلمة»; it records no mistakes and reveals nothing.
+   */
+  seekTo(key: string): boolean {
+    const index = this.cfg.words.findIndex((word) => word.key === key);
+    if (index < 0) return false;
+    this.cursor = index;
+    this.flagged = -1;
+    this.pendingRewind = null;
+    this.pendingUnknown = null;
+    this.setBlocked(false);
+    this.cfg.onCursor(this.cursor);
+    if (this.cursor >= this.cfg.normalized.length) this.finish();
+    return true;
   }
 
   /**
@@ -151,11 +176,15 @@ export class TranscriptTracker {
         this.pendingRewind.misses += 1;
         if (this.pendingRewind.misses < 2) return;
         this.pendingRewind = null;
+        this.pendingUnknown = null;
+        this.handleWrong(heard);
+        return;
       }
-      this.handleWrong(heard);
+      this.noteUnknown(heard);
       return;
     }
     if (alignment.kind === 'repeat' || alignment.kind === 'rewind') {
+      this.pendingUnknown = null;
       this.pendingRewind = {
         target: this.cursor + alignment.offset,
         span: alignment.span,
@@ -167,8 +196,9 @@ export class TranscriptTracker {
     }
 
     // A forward word means the reader is continuing from the cursor, so any
-    // unfinished restart candidate is no longer relevant.
+    // unfinished restart candidate and any stray token are no longer relevant.
     this.pendingRewind = null;
+    this.pendingUnknown = null;
 
     // While held on a word, only that word (or words merged with it) releases
     // the hold. Do not let a later word jump over the one being corrected.
@@ -270,6 +300,7 @@ export class TranscriptTracker {
 
     this.cursor = start;
     this.flagged = -1;
+    this.pendingUnknown = null;
     this.setBlocked(false);
 
     for (let i = 0; i < firstSpan; i++) {
@@ -290,6 +321,20 @@ export class TranscriptTracker {
     if (this.cursor >= this.cfg.normalized.length) this.finish();
   }
 
+  /**
+   * A token matched nothing. Never accuse the reader on the first one: browser
+   * recognisers insert filler words and drop half words constantly. The second
+   * consecutive miss is evidence enough, and a real wrong word is still caught
+   * when the following correct word skips over it.
+   */
+  private noteUnknown(token: string): void {
+    const count = (this.pendingUnknown?.count ?? 0) + 1;
+    this.pendingUnknown = { token, count };
+    if (!this.cfg.dontProgressUntilFixed && count < 2) return;
+    this.pendingUnknown = null;
+    this.handleWrong(token);
+  }
+
   private handleWrong(token: string): void {
     if (!this.cfg.detectMistakes) return;
     if (this.flagged === this.cursor) return;
@@ -300,6 +345,7 @@ export class TranscriptTracker {
 
   private advanceCorrect(count: number): void {
     this.pendingRewind = null;
+    this.pendingUnknown = null;
     for (let i = 0; i < count; i++) {
       const word = this.cfg.words[this.cursor];
       if (!word) break;
@@ -316,7 +362,11 @@ export class TranscriptTracker {
     type: EventType,
     meta?: TrackerMeta,
   ): void {
-    if (word) this.cfg.onEvent(word, type, meta);
+    if (!word) return;
+    // A word that is now correct (or wrong for another reason) no longer has an
+    // active manual harakat mark, so it can be flagged again later.
+    if (type === 'correct' || type === 'wrong') this.tashkeelMarked.delete(word.key);
+    this.cfg.onEvent(word, type, meta);
   }
 
   private setBlocked(value: boolean): void {

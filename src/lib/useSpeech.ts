@@ -57,6 +57,24 @@ interface SpeechErrorEvent {
 
 type RecognizerCtor = new () => Recognizer;
 
+/** Bare joining particles the recogniser sometimes splits off a word. */
+const JOINING_PARTICLE = new Set(['\u0648', '\u0641', '\u0628', '\u0644', '\u0643']);
+
+/** Join a split «و الله» back into «والله» before the tracker sees it. */
+export function mergeSplitParticles(tokens: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (JOINING_PARTICLE.has(token) && i + 1 < tokens.length) {
+      out.push(token + tokens[i + 1]);
+      i += 1;
+    } else {
+      out.push(token);
+    }
+  }
+  return out;
+}
+
 function recognizerCtor(): RecognizerCtor | null {
   if (typeof window === 'undefined') return null;
   const w = window as unknown as {
@@ -147,14 +165,23 @@ export function useSpeech(
 
       const tokens = splitTranscript(transcript);
       // Never replay tokens from an older/shorter results list: replaying would
-      // move the cursor over words the reader has not repeated.
-      if (tokens.length < consumedRef.current) return;
+      // move the cursor over words the reader has not repeated. If the engine
+      // revises a transcript down, move the mark down with it instead of
+      // blocking every later token.
+      if (tokens.length < consumedRef.current) {
+        consumedRef.current = tokens.length;
+        return;
+      }
       const consumed = consumedRef.current;
       // The last interim token may still change; wait for more context/final.
       const stable = hasInterim ? Math.max(0, tokens.length - 1) : tokens.length;
-      if (stable > consumed) {
-        const fresh = tokens.slice(consumed, stable);
-        consumedRef.current = stable;
+      // A bare «و» at the end may be the first half of «والله»; hold it until
+      // the next token arrives instead of feeding it as a one-letter word.
+      let end = stable;
+      while (end > consumed && JOINING_PARTICLE.has(tokens[end - 1])) end -= 1;
+      if (end > consumed) {
+        const fresh = mergeSplitParticles(tokens.slice(consumed, end));
+        consumedRef.current = end;
         if (fresh.length) onTokensRef.current(fresh);
       }
     };

@@ -30,9 +30,18 @@ describe('word matching', () => {
     expect(similarity('الرحمن', 'الرحمان')).toBeGreaterThan(0.8);
   });
 
-  it('requires short particles to match exactly', () => {
+  it('requires short particles to be the same word', () => {
     expect(wordScore('قل', 'قل')).toBe(1);
-    expect(wordScore('كل', 'قل')).toBe(0);
+    expect(wordScore('من', 'عن')).toBe(0);
+    expect(wordScore('لم', 'ولم')).toBe(0);
+  });
+
+  it('tolerates a recogniser confusion or an added long vowel', () => {
+    // Chrome's ar-SA engine regularly writes ق as ك and inserts a long alif.
+    expect(wordScore('كل', 'قل')).toBeGreaterThan(0.8);
+    expect(wordScore('قال', 'قل')).toBeGreaterThan(0.8);
+    expect(wordScore('السراط', 'الصراط')).toBeGreaterThan(0.9);
+    expect(wordScore('الظالين', 'الضالين')).toBeGreaterThan(0.9);
   });
 
   it('accepts a close long word but not a different one', () => {

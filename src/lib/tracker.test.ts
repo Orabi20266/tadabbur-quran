@@ -77,20 +77,42 @@ describe('TranscriptTracker', () => {
     expect(h.done()).toBe(true);
   });
 
-  it('records a wrong token once and waits for the correct word', () => {
+  it('ignores one unrecognised token but flags a repeated miss', () => {
     const h = makeTracker();
+    // A single odd token is normally recogniser noise, not a recitation error.
+    h.tracker.feed(['سيارة']);
+    expect(h.events).toHaveLength(0);
+    expect(h.cursor()).toBe(0);
+
     h.tracker.feed(['سيارة']);
     expect(h.events).toHaveLength(1);
     expect(h.events[0].type).toBe('wrong');
     expect(h.events[0].meta?.recitedText).toBe('سيارة');
     expect(h.cursor()).toBe(0);
 
-    h.tracker.feed(['سيارة']);
-    expect(h.events).toHaveLength(1);
-
     h.tracker.feed([spoken[0]]);
     expect(h.events.map((e) => e.type)).toEqual(['wrong', 'correct']);
     expect(h.cursor()).toBe(1);
+  });
+
+  it('forgets a stray token when the reader continues correctly', () => {
+    const h = makeTracker();
+    h.tracker.feed(['يعني']);
+    expect(h.events).toHaveLength(0);
+
+    h.tracker.feed([spoken[0]]);
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    expect(h.cursor()).toBe(1);
+  });
+
+  it('flags a wrong word when the next correct word skips over it', () => {
+    const h = makeTracker();
+    h.tracker.feed(['سيارة', spoken[1]]);
+    expect(h.events.map((e) => [e.key, e.type])).toEqual([
+      [allWords[0].key, 'wrong'],
+      [allWords[1].key, 'correct'],
+    ]);
+    expect(h.cursor()).toBe(2);
   });
 
   it('does not re-count a flagged word when the reader moves past it', () => {
@@ -114,6 +136,38 @@ describe('TranscriptTracker', () => {
     h.tracker.feed(['قُلۡ']);
     expect(h.events.map((e) => e.type)).toEqual(['correct']);
     expect(h.cursor()).toBe(1);
+  });
+
+  it('does not flag a partial diacritization from the recogniser', () => {
+    const h = makeTracker();
+    // «قُل» without the sukun is still the right vowel.
+    h.tracker.feed(['قُل']);
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    expect(h.cursor()).toBe(1);
+  });
+
+  it('allows a new harakat mark after the word was recited correctly again', () => {
+    const h = makeTracker();
+    h.tracker.feed([spoken[0]]);
+    expect(h.tracker.markTashkeel()).not.toBeNull();
+    h.tracker.feed([spoken[0], spoken[1]]);
+    expect(h.events.slice(-2).map((e) => e.type)).toEqual(['correct', 'correct']);
+    expect(h.tracker.markTashkeelAt(allWords[0].key)).not.toBeNull();
+  });
+
+  it('moves the cursor to a chosen word without recording anything', () => {
+    const h = makeTracker();
+    h.tracker.feed(spoken.slice(0, 2));
+    expect(h.tracker.seekTo(allWords[5].key)).toBe(true);
+    expect(h.cursor()).toBe(5);
+    expect(h.events).toHaveLength(2);
+    h.tracker.feed([spoken[5]]);
+    expect(h.cursor()).toBe(6);
+    expect(h.events.map((e) => e.type)).toEqual([
+      'correct',
+      'correct',
+      'correct',
+    ]);
   });
 
   it('does not guess harakat from undiacritized tokens', () => {
@@ -287,5 +341,39 @@ describe('TranscriptTracker', () => {
       allWords[7].key,
       allWords[8].key,
     ]);
+  });
+
+  it('tracks Al-Fatiha from ordinary recogniser spelling', () => {
+    const h = makeTracker({ words: wordsForRange(1, 1, 7) });
+    // Modern-standard spelling and the confusions Chrome's ar-SA engine makes:
+    // an added long alif, ص→س, ض→ظ, and qaf→kaf.
+    h.tracker.feed([
+      'بسم', 'الله', 'الرحمان', 'الرحيم',
+      'الحمد', 'لله', 'رب', 'العالمين',
+      'الرحمان', 'الرحيم',
+      'مالك', 'يوم', 'الدين',
+      'اياك', 'نعبد', 'واياك', 'نستعين',
+      'اهدنا', 'السراط', 'المستقيم',
+      'صراط', 'الذين', 'انعمت', 'عليهم', 'غير', 'المغضوب',
+      'عليهم', 'ولا', 'الظالين',
+    ]);
+    expect(h.cursor()).toBe(29);
+    expect(h.events).toHaveLength(29);
+    expect(h.events.every((e) => e.type === 'correct')).toBe(true);
+    expect(h.done()).toBe(true);
+  });
+
+  it('still flags a word the reader really skipped', () => {
+    const h = makeTracker({ words: wordsForRange(1, 1, 7) });
+    h.tracker.feed([
+      'بسم', 'الله', 'الرحمن', 'الرحيم',
+      'الحمد', 'لله', 'رب', 'العالمين',
+      'الرحمن', 'الرحيم',
+      'مالك', 'الدين',
+    ]);
+    expect(h.events.filter((e) => e.type === 'wrong').map((e) => e.key)).toEqual([
+      '1:4:1',
+    ]);
+    expect(h.cursor()).toBe(13);
   });
 });

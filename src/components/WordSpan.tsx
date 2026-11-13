@@ -10,6 +10,11 @@ export interface WordSpanProps {
   active?: boolean;
   /** The word the reader is expected to recite next. */
   current?: boolean;
+  /**
+   * Live session: a hidden word may still be tapped to move the tracking
+   * cursor to it, without revealing its text.
+   */
+  seekable?: boolean;
   onOpen?: () => void;
 }
 
@@ -21,9 +26,10 @@ export function WordSpan({
   interactive,
   active,
   current,
+  seekable,
   onOpen,
 }: WordSpanProps) {
-  const canOpen = Boolean(interactive && !hidden);
+  const canOpen = Boolean(interactive && (!hidden || seekable));
   const classes = ['word'];
   if (status !== 'neutral') classes.push(`is-${status}`);
   if (hidden) classes.push('is-hidden');
@@ -38,7 +44,13 @@ export function WordSpan({
       role={canOpen ? 'button' : undefined}
       tabIndex={canOpen ? 0 : undefined}
       aria-label={
-        hidden ? 'كلمة مخفية' : canOpen ? `كلمة ${text}، اعرض سجلها` : undefined
+        hidden
+          ? canOpen
+            ? 'كلمة مخفية، انقل التتبّع إليها'
+            : 'كلمة مخفية'
+          : canOpen
+            ? `كلمة ${text}، اعرض سجلها`
+            : undefined
       }
       aria-hidden={hidden || undefined}
       onClick={canOpen ? onOpen : undefined}

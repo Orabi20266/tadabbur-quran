@@ -64,15 +64,101 @@ export function similarity(a: string, b: string): number {
 }
 
 /**
- * Score one heard token against one expected word. Short particles must match
- * exactly: one letter of noise in a two-letter word changes its meaning.
+ * Letters the recogniser cannot reliably tell apart. The browser engine is
+ * trained on modern standard Arabic, not on Quranic recitation, so it regu-
+ * larly writes ق as ك, ص as س, ض as ظ and ط as ت. Two letters in one group are
+ * a small alignment penalty, not proof that the reader said a different word.
+ */
+const PHONETIC_GROUP: Record<string, string> = {
+  '\u0642': 'k', // ق
+  '\u0643': 'k', // ك
+  '\u0635': 's', // ص
+  '\u0633': 's', // س
+  '\u062b': 's', // ث
+  '\u0636': 'd', // ض
+  '\u0638': 'd', // ظ
+  '\u0630': 'd', // ذ
+  '\u0632': 'd', // ز
+  '\u0637': 't', // ط
+  '\u062a': 't', // ت
+};
+
+const LONG_VOWEL = new Set(['\u0627', '\u0648', '\u064a']);
+
+/** Cost of writing `a` where `b` was expected. */
+function replaceCost(a: string, b: string): number {
+  if (a === b) return 0;
+  const ga = PHONETIC_GROUP[a];
+  const gb = PHONETIC_GROUP[b];
+  if (ga && ga === gb) return 0.25;
+  return 1;
+}
+
+function vowelCost(ch: string): number {
+  return LONG_VOWEL.has(ch) ? 0.5 : 1;
+}
+
+/**
+ * Edit distance in which a long-vowel letter (ا/و/ي) can be added or dropped
+ * for half price, and a known recogniser confusion costs a quarter. The
+ * Uthmani text and the recogniser disagree about long vowels constantly
+ * («الرحمن» / «الرحمان»), so those differences must not break the cursor.
+ */
+export function weightedLevenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return [...b].reduce((sum, ch) => sum + vowelCost(ch), 0);
+  if (!b.length) return [...a].reduce((sum, ch) => sum + vowelCost(ch), 0);
+
+  let prev = [0];
+  for (let j = 1; j <= b.length; j++) prev[j] = prev[j - 1] + vowelCost(b[j - 1]);
+
+  for (let i = 1; i <= a.length; i++) {
+    const row = [prev[0] + vowelCost(a[i - 1])];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(
+        prev[j] + vowelCost(a[i - 1]),
+        row[j - 1] + vowelCost(b[j - 1]),
+        prev[j - 1] + replaceCost(a[i - 1], b[j - 1]),
+      );
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/** Similarity using the recognition-aware edit distance, 0..1. */
+export function phoneticSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const longest = Math.max(a.length, b.length);
+  if (!longest) return 1;
+  return 1 - weightedLevenshtein(a, b) / longest;
+}
+
+/**
+ * Score one heard token against one expected word. Short particles need a
+ * closer match than long words, but a single recogniser confusion (or a long
+ * vowel the engine added) is still accepted: refusing those made ordinary
+ * recitation look wrong.
+ *
+ * The first letter must still agree (up to a known confusion). Without that
+ * guard «لم» would match «ولم» and an ordinary stutter would move the cursor.
  */
 export function wordScore(heard: string, expected: string): number {
   if (!heard || !expected) return 0;
   if (heard === expected) return 1;
-  if (heard.length < 3 || expected.length < 3) return 0;
-  const score = similarity(heard, expected);
-  return score >= 0.72 ? score : 0;
+  const longest = Math.max(heard.length, expected.length);
+  if (longest <= 1) return 0;
+  const first = heard[0];
+  const want = expected[0];
+  if (
+    first !== want &&
+    !(PHONETIC_GROUP[first] && PHONETIC_GROUP[first] === PHONETIC_GROUP[want])
+  ) {
+    return 0;
+  }
+  const score = phoneticSimilarity(heard, expected);
+  if (longest === 2) return score >= 0.8 ? score : 0;
+  return score >= 0.78 ? score : 0;
 }
 
 export interface WordMatch {
@@ -82,10 +168,18 @@ export interface WordMatch {
 }
 
 /** Match a token against the expected words starting at `expected[0]`. */
-export function matchAt(token: string, expected: string[]): WordMatch | null {
+export function matchAt(
+  token: string,
+  expected: string[],
+  strict = false,
+): WordMatch | null {
   if (!token || expected.length === 0) return null;
 
-  const single = wordScore(token, expected[0]);
+  const single = strict
+    ? token === expected[0]
+      ? 1
+      : 0
+    : wordScore(token, expected[0]);
   let best: WordMatch | null = single > 0 ? { span: 1, score: single } : null;
 
   for (let span = 2; span <= 3 && span <= expected.length; span++) {
@@ -93,7 +187,7 @@ export function matchAt(token: string, expected: string[]): WordMatch | null {
     if (token === joined) return { span, score: 1 };
     // Only trust a fuzzy merged match when the token is clearly longer than a
     // single word, otherwise we would skip words on ordinary noisy matches.
-    if (token.length >= 5) {
+    if (!strict && token.length >= 5) {
       const score = similarity(token, joined);
       if (score >= 0.85 && (!best || score > best.score)) {
         best = { span, score };
@@ -152,10 +246,10 @@ export function alignToken(
   for (let offset = 0; offset <= lookAhead; offset++) {
     const at = cursor + offset;
     if (at >= expected.length) break;
-    const match = matchAt(token, expected.slice(at));
+    // Skipping ahead must never be based on a fuzzy guess: only a later word
+    // written exactly like the heard token may move the cursor over a gap.
+    const match = matchAt(token, expected.slice(at), offset > 0);
     if (!match) continue;
-    // Never jump a word on a fuzzy guess: only an exact later word may skip.
-    if (offset > 0 && match.score < 0.99) continue;
     const rank = (match.score >= 1 ? 0 : 100) + offset;
     if (rank < bestRank) {
       bestRank = rank;
@@ -179,7 +273,7 @@ export function alignToken(
   const rewindFloor = Math.max(0, cursor - maxRewind);
   for (let back = repeatFloor - 1; back >= rewindFloor; back--) {
     const match = matchAt(token, expected.slice(back));
-    if (!match || match.score < 0.9) continue;
+    if (!match || match.score < 0.95) continue;
     return { kind: 'rewind', offset: back - cursor, span: match.span, score: match.score };
   }
 

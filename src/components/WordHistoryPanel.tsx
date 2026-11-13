@@ -1,4 +1,4 @@
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, Crosshair } from 'lucide-react';
 import { useApp, confidenceOf, highlightLevel, remainingToClear } from '../lib/store';
 import { getSurah, arabicNumber, wordsOf } from '../lib/quran';
 import { MistakesList } from './MistakesList';
@@ -10,6 +10,8 @@ interface WordHistoryPanelProps {
   /** Live session only: flag the word as recited with a wrong vowel. */
   onMarkHarakat?: () => void;
   harakatMarked?: boolean;
+  /** Live session only: move the tracking cursor to this word. */
+  onResync?: () => void;
 }
 
 export function WordHistoryPanel({
@@ -18,6 +20,7 @@ export function WordHistoryPanel({
   onRestore,
   onMarkHarakat,
   harakatMarked,
+  onResync,
 }: WordHistoryPanelProps) {
   const stat = useApp((s) => s.wordStats[wordKey]);
   const allMistakes = useApp((s) => s.mistakes);
@@ -62,6 +65,18 @@ export function WordHistoryPanel({
             {harakatMarked
               ? 'أعد تلاوة الكلمة بالحركة الصحيحة لتُزال من الأخطاء.'
               : 'استخدمها إذا قرأت الكلمة بحركة خاطئة. لا يتوقّف التتبّع.'}
+          </small>
+        </div>
+      ) : null}
+
+      {onResync ? (
+        <div className="resync-action">
+          <button className="btn wide btn-ghost" onClick={onResync}>
+            <Crosshair size={16} aria-hidden />
+            تابع التتبّع من هذه الكلمة
+          </button>
+          <small className="muted">
+            إن فقد التعرّف الصوتي مكانه، انقل المؤشّر إلى هنا دون تسجيل خطأ.
           </small>
         </div>
       ) : null}

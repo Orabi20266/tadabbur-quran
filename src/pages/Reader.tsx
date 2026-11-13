@@ -17,6 +17,7 @@ import {
   SkipForward,
   Sparkles,
   Square,
+  Crosshair,
 } from 'lucide-react';
 import {
   endSession,
@@ -94,6 +95,8 @@ export function Reader() {
   const [cursor, setCursor] = useState(0);
   const [mistakesOpen, setMistakesOpen] = useState(false);
   const [historyWord, setHistoryWord] = useState<string | null>(null);
+  /** A hidden word chosen as a new tracking anchor; never shows its text. */
+  const [seekWord, setSeekWord] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -532,6 +535,19 @@ export function Reader() {
     showToast(`حركة خاطئة على «${text}» — أعد تلاوتها صحيحة لتصحيحها`);
   };
 
+  const resyncFrom = (key: string) => {
+    if (phase !== 'live' || paused) return;
+    if (!trackerRef.current?.seekTo(key)) return;
+    setHistoryWord(null);
+    setSeekWord(null);
+    showToast('أعدنا المزامنة — تابع التلاوة من هذه الكلمة');
+  };
+
+  const openWord = (key: string, isHidden: boolean) => {
+    if (isHidden) setSeekWord(key);
+    else setHistoryWord(key);
+  };
+
   const retryMic = () => {
     startSpeech();
   };
@@ -770,7 +786,8 @@ export function Reader() {
                       active={lastWordRef.current?.key === key}
                       current={currentKey === key}
                       interactive
-                      onOpen={() => setHistoryWord(key)}
+                      seekable={phase === 'live' && !paused}
+                      onOpen={() => openWord(key, isHidden)}
                     />{' '}
                   </Fragment>
                 );
@@ -976,8 +993,41 @@ export function Reader() {
                 : undefined
             }
             harakatMarked={statuses[historyWord] === 'tashkeel'}
+            onResync={
+              phase === 'live' && !paused
+                ? () => resyncFrom(historyWord)
+                : undefined
+            }
           />
         ) : null}
+      </Sheet>
+
+      <Sheet
+        open={!!seekWord}
+        title="إعادة المزامنة"
+        onClose={() => setSeekWord(null)}
+      >
+        {seekWord ? (() => {
+          const [, a, i] = seekWord.split(':').map(Number);
+          return (
+            <div className="seek-panel">
+              <p className="center">
+                الكلمة {arabicNumber(i + 1)} في الآية {arabicNumber(a)} — مخفية،
+                لن نكشف نصّها.
+              </p>
+              <button
+                className="btn wide btn-primary"
+                onClick={() => resyncFrom(seekWord)}
+              >
+                <Crosshair size={16} aria-hidden /> تابع التتبّع من هذه الكلمة
+              </button>
+              <p className="muted small center">
+                ينتقل المؤشّر إلى هنا دون تسجيل خطأ ودون تغيير عدّاد الأخطاء، ثم
+                تابع التلاوة بصوتك.
+              </p>
+            </div>
+          );
+        })() : null}
       </Sheet>
 
       <Sheet open={navOpen} title="انتقل إلى" onClose={() => setNavOpen(false)}>

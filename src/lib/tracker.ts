@@ -1,4 +1,5 @@
 import { alignToken, matchAt, normalizeToken } from './align';
+import { muqattaahAt, readLetterNames } from './muqattaat';
 import { tashkeelDiffers } from './quran';
 import type { DetectorWord, EventType } from './types';
 
@@ -61,6 +62,12 @@ export class TranscriptTracker {
    * off the expected word.
    */
   private pendingUnknown: { token: string; count: number } | null = null;
+  /**
+   * Spoken names of a disconnected-letters word, collected across tokens:
+   * «ألف» + «لام» + «ميم» is one mushaf word. Reset as soon as the reader moves
+   * on or the names do not follow the expected order.
+   */
+  private letterRun: { key: string; heard: string; letters: string } | null = null;
 
   constructor(cfg: TranscriptTrackerConfig) {
     this.cfg = cfg;
@@ -109,6 +116,7 @@ export class TranscriptTracker {
     this.flagged = -1;
     this.pendingRewind = null;
     this.pendingUnknown = null;
+    this.letterRun = null;
     this.setBlocked(false);
     this.cfg.onCursor(this.cursor);
     if (this.cursor >= this.cfg.normalized.length) this.finish();
@@ -143,6 +151,67 @@ export class TranscriptTracker {
     return word;
   }
 
+  /**
+   * Consume one token while the cursor sits on a disconnected-letters word.
+   * Returns true when the token belonged to that word (fully or partially), so
+   * the ordinary alignment must not also process it.
+   */
+  private handleLetters(heard: string, token: string): boolean {
+    const word = this.cfg.words[this.cursor];
+    if (!word) return false;
+    const mq = muqattaahAt(word.surah, word.ayah, word.index);
+    if (!mq) {
+      this.letterRun = null;
+      return false;
+    }
+
+    if (token === mq) {
+      this.letterRun = null;
+      this.completeLetters(heard);
+      return true;
+    }
+
+    const letters = readLetterNames(token);
+    if (!letters) {
+      // An ordinary word: the reader is not spelling the letters out.
+      this.letterRun = null;
+      return false;
+    }
+
+    const run =
+      this.letterRun?.key === word.key
+        ? this.letterRun
+        : { key: word.key, heard: '', letters: '' };
+    const next = run.letters + letters;
+    if (!mq.startsWith(next)) {
+      this.letterRun = null;
+      return false;
+    }
+
+    this.pendingRewind = null;
+    const spoken = run.heard ? `${run.heard} ${heard}` : heard;
+    if (next === mq) {
+      this.letterRun = null;
+      this.completeLetters(spoken);
+    } else {
+      this.letterRun = { key: word.key, heard: spoken, letters: next };
+    }
+    return true;
+  }
+
+  /** One mushaf word recited as several letter names: advance exactly one word. */
+  private completeLetters(spoken: string): void {
+    const word = this.cfg.words[this.cursor];
+    if (!word) return;
+    this.pendingUnknown = null;
+    this.emit(word, 'correct', { recitedText: spoken, confidence: 1 });
+    this.cursor += 1;
+    this.flagged = -1;
+    if (this.blocked) this.setBlocked(false);
+    this.cfg.onCursor(this.cursor);
+    if (this.cursor >= this.cfg.normalized.length) this.finish();
+  }
+
   private handleToken(raw: string): void {
     const heard = raw.trim();
     if (!heard) return;
@@ -154,6 +223,11 @@ export class TranscriptTracker {
       this.finish();
       return;
     }
+
+    // The disconnected letters are written as one word but recited as several
+    // letter names. Check them before ordinary alignment so the extra tokens do
+    // not look like mistakes.
+    if (!this.pendingRewind && this.handleLetters(heard, token)) return;
 
     // A candidate restart is confirmed only when the reader continues with the
     // word that follows the earlier one. A token from the last two words may be
@@ -301,6 +375,7 @@ export class TranscriptTracker {
     this.cursor = start;
     this.flagged = -1;
     this.pendingUnknown = null;
+    this.letterRun = null;
     this.setBlocked(false);
 
     for (let i = 0; i < firstSpan; i++) {
@@ -346,6 +421,7 @@ export class TranscriptTracker {
   private advanceCorrect(count: number): void {
     this.pendingRewind = null;
     this.pendingUnknown = null;
+    this.letterRun = null;
     for (let i = 0; i < count; i++) {
       const word = this.cfg.words[this.cursor];
       if (!word) break;

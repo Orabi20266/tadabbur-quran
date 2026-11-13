@@ -170,7 +170,7 @@ export function Settings() {
         />
         <ToggleRow
           label="كشف أخطاء التشكيل"
-          hint="تلقائي إذا أعاد المحرّك الحركات، أو سجّلها بزر «حركة» أثناء التلاوة"
+          hint="إن أعاد المحرّك الحركات فحصها تلقائياً؛ وإلا سجّلها بزر «حركة» أو من بطاقة الكلمة"
           checked={settings.detectTashkeel}
           onChange={(v) => updateSettings({ detectTashkeel: v })}
         />

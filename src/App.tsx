@@ -8,6 +8,7 @@ import { Activity } from './pages/Activity';
 import { Settings } from './pages/Settings';
 import { Onboarding } from './pages/Onboarding';
 import { Tajweed } from './pages/Tajweed';
+import { HadithPage } from './pages/Hadith';
 import { useApp } from './lib/store';
 
 function useTheme() {
@@ -69,6 +70,14 @@ function Shell() {
         element={
           <Layout>
             <Tajweed />
+          </Layout>
+        }
+      />
+      <Route
+        path="/hadith"
+        element={
+          <Layout>
+            <HadithPage />
           </Layout>
         }
       />

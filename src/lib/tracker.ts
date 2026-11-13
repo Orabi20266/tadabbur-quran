@@ -41,6 +41,8 @@ export class TranscriptTracker {
   private done = false;
   /** Cursor index that already received a wrong event for the current attempt. */
   private flagged = -1;
+  /** Words already flagged as a harakat mistake in this session. */
+  private tashkeelMarked = new Set<string>();
   /**
    * First word of a possible restart from an earlier position. We wait for the
    * next token to continue the same sequence before moving the cursor back.
@@ -89,20 +91,31 @@ export class TranscriptTracker {
   }
 
   /**
-   * Record a harakat mistake on the current word and move on. Used when the
+   * Record a harakat mistake on the word that was just recited. Used when the
    * recogniser cannot report vowels (the browser engine) and the reader taps
-   * the harakat button after reciting the word with a wrong vowel.
+   * the harakat button after reciting a word with the wrong vowel.
+   *
+   * The cursor does not move: the reader already recited that word, and the
+   * next word is still the one they should continue with.
    */
-  markTashkeel(): void {
-    if (this.done || this.blocked) return;
-    const word = this.cfg.words[this.cursor];
-    if (!word) return;
-    this.pendingRewind = null;
-    this.flagged = -1;
+  markTashkeel(): DetectorWord | null {
+    if (this.cursor <= 0) return null;
+    return this.markTashkeelAt(this.cfg.words[this.cursor - 1].key);
+  }
+
+  /**
+   * Record a harakat mistake on any word already recited in this session.
+   * Returns the flagged word, or null when the word was not recited yet or is
+   * already flagged. The cursor never changes.
+   */
+  markTashkeelAt(key: string): DetectorWord | null {
+    const index = this.cfg.words.findIndex((word) => word.key === key);
+    if (index < 0 || index >= this.cursor) return null;
+    if (this.tashkeelMarked.has(key)) return null;
+    this.tashkeelMarked.add(key);
+    const word = this.cfg.words[index];
     this.emit(word, 'tashkeel');
-    this.cursor += 1;
-    this.cfg.onCursor(this.cursor);
-    if (this.cursor >= this.cfg.normalized.length) this.finish();
+    return word;
   }
 
   private handleToken(raw: string): void {
@@ -198,6 +211,8 @@ export class TranscriptTracker {
         alignment.span === 1 &&
         i === 0 &&
         tashkeelDiffers(heard, this.cfg.diacritized[start] ?? '');
+      if (harakatWrong) this.tashkeelMarked.add(word.key);
+      else this.tashkeelMarked.delete(word.key);
       this.emit(word, harakatWrong ? 'tashkeel' : 'correct', {
         recitedText: heard,
         confidence: alignment.score,

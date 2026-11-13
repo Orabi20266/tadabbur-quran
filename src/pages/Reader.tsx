@@ -108,6 +108,13 @@ export function Reader() {
     phase === 'live' && sessionStart !== null ? sessionStart : ayahParam;
   const to = Math.min(sData.total_verses, from + PAGE - 1);
 
+  // The sheet may only flag words the reader has already passed; a word still
+  // waiting at the cursor has not been recited yet.
+  const historyPosition = useMemo(() => {
+    if (!historyWord) return -1;
+    return wordsForRange(surah, from, to).findIndex((w) => w.key === historyWord);
+  }, [historyWord, surah, from, to]);
+
   const trackerRef = useRef<TranscriptTracker | null>(null);
   const pausedRef = useRef(false);
   const handleTokens = useCallback((tokens: string[]) => {
@@ -128,6 +135,7 @@ export function Reader() {
   const errorsRef = useRef(0);
   const wordsRef = useRef(0);
   const ayahsRef = useRef(0);
+  const statusesRef = useRef<Record<string, WordStatus>>({});
   const revealedRef = useRef<Record<string, boolean>>({});
   const ayahCountRef = useRef<Record<number, number>>({});
   const doneSetRef = useRef<Set<number>>(new Set());
@@ -208,6 +216,7 @@ export function Reader() {
       ayahCountRef.current = {};
       doneSetRef.current = new Set();
       setErrors(0);
+      statusesRef.current = {};
       setStatuses({});
       setRevealed({});
       setSummary(null);
@@ -273,7 +282,11 @@ export function Reader() {
   const onDetectorEvent = useCallback(
     (word: DetectorWord, type: EventType, meta?: TrackerMeta) => {
       const text = wordsOf(word.surah, word.ayah)[word.index] ?? '';
-      setStatuses((prev) => ({ ...prev, [word.key]: type }));
+      const prior = statusesRef.current[word.key] ?? 'neutral';
+      // Tapping «حركة» twice must not count the same word twice.
+      if (type === 'tashkeel' && prior === 'tashkeel') return;
+      statusesRef.current = { ...statusesRef.current, [word.key]: type };
+      setStatuses(statusesRef.current);
 
       if (type === 'wrong' || type === 'tashkeel') playMistakeSound();
 
@@ -299,7 +312,9 @@ export function Reader() {
         }
         setRevealed((prev) => (prev[word.key] ? prev : { ...prev, [word.key]: true }));
       }
-      if (type !== 'correct') {
+      // Correcting a wrong word to "harakat only" is not a second mistake, so
+      // the counter must not move when the word was already flagged.
+      if (type !== 'correct' && prior !== 'wrong' && prior !== 'tashkeel') {
         errorsRef.current += 1;
         setErrors(errorsRef.current);
       }
@@ -457,7 +472,8 @@ export function Reader() {
 
   const peekWord = (target: DetectorWord) => {
     const text = wordsOf(target.surah, target.ayah)[target.index] ?? '';
-    setStatuses((prev) => ({ ...prev, [target.key]: 'peek' }));
+    statusesRef.current = { ...statusesRef.current, [target.key]: 'peek' };
+    setStatuses(statusesRef.current);
     setRevealed((prev) => ({ ...prev, [target.key]: true }));
     errorsRef.current += 1;
     setErrors(errorsRef.current);
@@ -495,7 +511,25 @@ export function Reader() {
 
   const markTashkeel = () => {
     if (phase !== 'live' || paused || blockedWord) return;
-    trackerRef.current?.markTashkeel();
+    const word = trackerRef.current?.markTashkeel() ?? null;
+    if (!word) {
+      showToast(
+        cursor === 0
+          ? 'لم تُقرأ كلمة بعد — اقرأ ثم سجّل حركة الكلمة'
+          : 'الحركة مسجّلة على هذه الكلمة بالفعل',
+      );
+      return;
+    }
+    const text = wordsOf(word.surah, word.ayah)[word.index] ?? '';
+    showToast(`حركة خاطئة على «${text}» — أعد تلاوتها صحيحة لتصحيحها`);
+  };
+
+  const markTashkeelWord = (key: string) => {
+    if (phase !== 'live' || paused) return;
+    const word = trackerRef.current?.markTashkeelAt(key) ?? null;
+    if (!word) return;
+    const text = wordsOf(word.surah, word.ayah)[word.index] ?? '';
+    showToast(`حركة خاطئة على «${text}» — أعد تلاوتها صحيحة لتصحيحها`);
   };
 
   const retryMic = () => {
@@ -612,9 +646,9 @@ export function Reader() {
             <button
               className="chip-btn"
               onClick={markTashkeel}
-              disabled={paused}
-              aria-label="تسجيل خطأ في حركة الكلمة الحالية"
-              title="حركة خاطئة — سجّلها وتابع"
+              disabled={paused || cursor === 0}
+              aria-label="تسجيل حركة خاطئة على آخر كلمة قرأتها"
+              title="سجّل حركة خاطئة على آخر كلمة قرأتها — لا يتوقّف التتبّع"
             >
               <CircleAlert size={14} aria-hidden />
               حركة
@@ -933,6 +967,15 @@ export function Reader() {
             wordKey={historyWord}
             onRemove={removeMistake}
             onRestore={restoreMistake}
+            onMarkHarakat={
+              phase === 'live' &&
+              !paused &&
+              historyPosition >= 0 &&
+              historyPosition < cursor
+                ? () => markTashkeelWord(historyWord)
+                : undefined
+            }
+            harakatMarked={statuses[historyWord] === 'tashkeel'}
           />
         ) : null}
       </Sheet>

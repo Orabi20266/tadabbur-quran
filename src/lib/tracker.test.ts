@@ -122,11 +122,38 @@ describe('TranscriptTracker', () => {
     expect(h.events.map((e) => e.type)).toEqual(['correct']);
   });
 
-  it('records a manual harakat mistake and advances', () => {
+  it('records a manual harakat mistake on the last recited word without moving', () => {
     const h = makeTracker();
-    h.tracker.markTashkeel();
-    expect(h.events.map((e) => e.type)).toEqual(['tashkeel']);
+    expect(h.tracker.markTashkeel()).toBeNull();
+    h.tracker.feed([spoken[0]]);
+    const word = h.tracker.markTashkeel();
+    expect(word?.key).toBe(allWords[0].key);
+    expect(h.events.map((e) => e.type)).toEqual(['correct', 'tashkeel']);
     expect(h.cursor()).toBe(1);
+  });
+
+  it('does not count the same harakat mark twice', () => {
+    const h = makeTracker();
+    h.tracker.feed([spoken[0]]);
+    expect(h.tracker.markTashkeel()).not.toBeNull();
+    expect(h.tracker.markTashkeel()).toBeNull();
+    expect(h.events.filter((e) => e.type === 'tashkeel')).toHaveLength(1);
+  });
+
+  it('marks any earlier recited word by key', () => {
+    const h = makeTracker();
+    h.tracker.feed([spoken[0], spoken[1]]);
+    const word = h.tracker.markTashkeelAt(allWords[0].key);
+    expect(word?.key).toBe(allWords[0].key);
+    expect(h.events.map((e) => e.type)).toEqual(['correct', 'correct', 'tashkeel']);
+    expect(h.cursor()).toBe(2);
+  });
+
+  it('refuses to mark a word that has not been recited yet', () => {
+    const h = makeTracker();
+    h.tracker.feed([spoken[0]]);
+    expect(h.tracker.markTashkeelAt(allWords[1].key)).toBeNull();
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
   });
 
   it('ignores a stuttered previous word', () => {

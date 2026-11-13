@@ -1,3 +1,4 @@
+import { CircleAlert } from 'lucide-react';
 import { useApp, confidenceOf, highlightLevel, remainingToClear } from '../lib/store';
 import { getSurah, arabicNumber, wordsOf } from '../lib/quran';
 import { MistakesList } from './MistakesList';
@@ -6,9 +7,18 @@ interface WordHistoryPanelProps {
   wordKey: string;
   onRemove: (id: string) => void;
   onRestore: (id: string) => void;
+  /** Live session only: flag the word as recited with a wrong vowel. */
+  onMarkHarakat?: () => void;
+  harakatMarked?: boolean;
 }
 
-export function WordHistoryPanel({ wordKey, onRemove, onRestore }: WordHistoryPanelProps) {
+export function WordHistoryPanel({
+  wordKey,
+  onRemove,
+  onRestore,
+  onMarkHarakat,
+  harakatMarked,
+}: WordHistoryPanelProps) {
   const stat = useApp((s) => s.wordStats[wordKey]);
   const allMistakes = useApp((s) => s.mistakes);
   const [surah, ayah, index] = wordKey.split(':').map(Number);
@@ -37,6 +47,24 @@ export function WordHistoryPanel({ wordKey, onRemove, onRestore }: WordHistoryPa
           </span>
         ))}
       </p>
+
+      {onMarkHarakat ? (
+        <div className="harakat-action">
+          <button
+            className={`btn wide${harakatMarked ? ' btn-ghost' : ' btn-secondary'}`}
+            onClick={onMarkHarakat}
+            disabled={harakatMarked}
+          >
+            <CircleAlert size={16} aria-hidden />
+            {harakatMarked ? 'الحركة مسجّلة على هذه الكلمة' : 'سجّل حركة خاطئة على هذه الكلمة'}
+          </button>
+          <small className="muted">
+            {harakatMarked
+              ? 'أعد تلاوة الكلمة بالحركة الصحيحة لتُزال من الأخطاء.'
+              : 'استخدمها إذا قرأت الكلمة بحركة خاطئة. لا يتوقّف التتبّع.'}
+          </small>
+        </div>
+      ) : null}
 
       <div className="stat-grid">
         <div className="stat">

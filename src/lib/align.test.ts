@@ -4,6 +4,7 @@ import {
   levenshtein,
   matchAt,
   similarity,
+  splitTranscript,
   tokenizeTranscript,
   wordScore,
 } from './align';
@@ -22,6 +23,14 @@ describe('transcript tokenization', () => {
   it('keeps words separate instead of concatenating them', () => {
     expect(tokenizeTranscript('بسم الله الرحمن الرحيم')).toHaveLength(4);
   });
+
+  it('reads the spoken «ألف» the engine writes as 1000', () => {
+    expect(tokenizeTranscript('1000 لام ميم')).toEqual(['الف', 'لام', 'ميم']);
+    expect(tokenizeTranscript('١٠٠٠ لام ميم')).toEqual(['الف', 'لام', 'ميم']);
+    expect(tokenizeTranscript('1,000 لام')).toEqual(['الف', 'لام']);
+    // The transcript splitter must not throw the digits away first.
+    expect(splitTranscript('1000 لام ميم')).toEqual(['1000', 'لام', 'ميم']);
+  });
 });
 
 describe('word matching', () => {
@@ -35,6 +44,20 @@ describe('word matching', () => {
     expect(wordScore('قل', 'قل')).toBe(1);
     expect(wordScore('من', 'عن')).toBe(0);
     expect(wordScore('قال', 'قل')).toBeGreaterThan(0.8);
+  });
+
+  it('accepts ikhfa and iqlab tanween as a nasal or meem', () => {
+    // «كأساً» with ikhfa sounds like «كاسن», with iqlab like «كاسم».
+    expect(wordScore('كاسن', 'كاسا')).toBeGreaterThan(0.8);
+    expect(wordScore('كاسم', 'كاسا')).toBeGreaterThan(0.8);
+    // A two-letter word may not turn into another common word.
+    expect(wordScore('من', 'ما')).toBe(0);
+  });
+
+  it('accepts a dropped lam of the definite article', () => {
+    // «ٱلشَّمۡسُ» with a sun letter is heard «اشمس».
+    expect(wordScore('اشمس', 'الشمس')).toBeGreaterThan(0.78);
+    expect(wordScore('ارحمن', 'الرحمن')).toBeGreaterThan(0.78);
   });
 
   it('accepts a dropped or added attached particle', () => {
@@ -80,6 +103,14 @@ describe('word matching', () => {
 
   it('matches merged words as one token', () => {
     expect(matchAt('قلهو', ['قل', 'هو', 'الله'])).toEqual({ span: 2, score: 1 });
+  });
+
+  it('matches a merged pair whose noon was assimilated', () => {
+    // «مِن رَّبِّكَ» spoken continuously is heard «مرربك».
+    expect(matchAt('مرربك', ['من', 'ربك', 'شيء'])).toEqual({ span: 2, score: 1 });
+    expect(matchAt('ممبعد', ['من', 'بعد'])).toEqual({ span: 2, score: 1 });
+    // Forward skipping is stricter and must not use the assimilated form.
+    expect(matchAt('مرربك', ['من', 'ربك'], true)).toBeNull();
   });
 });
 

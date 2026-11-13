@@ -372,6 +372,13 @@ describe('TranscriptTracker', () => {
     expect(h.done()).toBe(true);
   });
 
+  it('tracks An-Naba 34 when ikhfa writes the tanween as a noon', () => {
+    const h = makeTracker({ words: wordsForRange(78, 34, 34) });
+    h.tracker.feed(['كاسن', 'دهاقن']);
+    expect(h.cursor()).toBe(2);
+    expect(h.events.map((e) => e.type)).toEqual(['correct', 'correct']);
+  });
+
   it('accepts an idgham noon the recogniser wrote as the next letter', () => {
     const h = makeTracker({ words: wordsForRange(78, 35, 35) });
     // «لَا يَسۡمَعُونَ فِيهَا لَغۡوٗا وَلَا كِذَّٰبٗا»

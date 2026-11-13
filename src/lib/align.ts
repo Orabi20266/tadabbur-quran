@@ -6,8 +6,22 @@ import { normalizeArabic } from './quran';
  * tested without a microphone or a browser.
  */
 
-/** Normalise one recognised token; it never contains spaces. */
+/**
+ * Normalise one recognised token; it never contains spaces.
+ *
+ * The ar-SA engine writes the spoken «ألف» as the number 1000 (it is also the
+ * word for “thousand”), which used to vanish in normalisation and made
+ * «ألف لام ميم» unrecognisable. Digits never occur in the Quran text, so a bare
+ * 1000 can safely be read back as «ألف».
+ */
 export function normalizeToken(raw: string): string {
+  const bare = raw.trim();
+  if (bare && /^[0-9\u0660-\u0669.,\u066B\s]+$/.test(bare)) {
+    const digits = bare
+      .replace(/[\u0660-\u0669]/g, (d) => String('\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669'.indexOf(d)))
+      .replace(/[.,\u066B\s]/g, '');
+    if (digits === '1000') return '\u0627\u0644\u0641';
+  }
   return normalizeArabic(raw).replace(/[^\u0621-\u064A]/g, '');
 }
 
@@ -31,7 +45,10 @@ export function splitTranscript(text: string): string[] {
   return text
     .split(/\s+/)
     .map((token) =>
-      token.replace(/[^\u0621-\u064A\u064B-\u065F\u0670\u06D6-\u06ED]/g, ''),
+      token.replace(
+        /[^\u0621-\u064A\u064B-\u065F\u0670\u06D6-\u06ED0-9\u0660-\u0669]/g,
+        '',
+      ),
     )
     .filter((token) => token.length > 0);
 }
@@ -151,11 +168,8 @@ export function wordScore(heard: string, expected: string): number {
   if (!heard || !expected) return 0;
   if (heard === expected) return 1;
 
-  const direct = scorePair(heard, expected);
-  if (direct > 0) return direct;
-
-  const assimilated = assimilationScore(heard, expected);
-  if (assimilated > 0) return assimilated;
+  const core = scoreCore(heard, expected);
+  if (core > 0) return core;
 
   // A dropped or extra attached particle: «كأس» for «وكأسا». Only for
   // words long enough that the particle is not the whole meaning: dropping the
@@ -163,14 +177,25 @@ export function wordScore(heard: string, expected: string): number {
   if (heard[0] !== expected[0]) {
     let best = 0;
     if (JOINING_PARTICLE.has(expected[0]) && expected.length >= 5) {
-      best = Math.max(best, scorePair(heard, expected.slice(1)));
+      best = Math.max(best, scoreCore(heard, expected.slice(1)));
     }
     if (JOINING_PARTICLE.has(heard[0]) && heard.length >= 5) {
-      best = Math.max(best, scorePair(heard.slice(1), expected));
+      best = Math.max(best, scoreCore(heard.slice(1), expected));
     }
     return best;
   }
   return 0;
+}
+
+/** The matching rules that do not move letters between positions. */
+function scoreCore(heard: string, expected: string): number {
+  const direct = scorePair(heard, expected);
+  if (direct > 0) return direct;
+
+  const assimilated = assimilationScore(heard, expected);
+  if (assimilated > 0) return assimilated;
+
+  return tanweenScore(heard, expected);
 }
 
 /**
@@ -188,6 +213,20 @@ function assimilationScore(heard: string, expected: string): number {
   if (heard[heard.length - 1] === '\u0646') return 0;
   if (!IDGHAM_TARGETS.has(heard[heard.length - 1])) return 0;
   return heard.slice(0, -1) === expected.slice(0, -1) ? 0.9 : 0;
+}
+
+/**
+ * A tanween is never a plain «ا» in speech: with ikhfa it is a nasal noon, with
+ * iqlab a meem, and recognisers write those sounds («كأساً» → «كاسن»، «كاسم»).
+ * Only words of three letters or more are considered, so «ما» can never be read
+ * as «من».
+ */
+function tanweenScore(heard: string, expected: string): number {
+  if (expected.length < 3 || heard.length !== expected.length) return 0;
+  if (!expected.endsWith('\u0627')) return 0;
+  const last = heard[heard.length - 1];
+  if (last !== '\u0646' && last !== '\u0645') return 0;
+  return heard.slice(0, -1) === expected.slice(0, -1) ? 0.86 : 0;
 }
 
 /**
@@ -218,6 +257,29 @@ export interface WordMatch {
   score: number;
 }
 
+/**
+ * How a run of expected words sounds when the noon rules apply across their
+ * boundaries: a final ن becomes م before ب (iqlab), and becomes the first
+ * letter of the next word before ي/ر/م/ل/و/ن (idgham). Used only for merged
+ * recogniser tokens, so a single word is never loosened.
+ */
+function assimilatedJoin(words: string[]): string {
+  let out = '';
+  for (let i = 0; i < words.length; i++) {
+    let word = words[i];
+    const next = words[i + 1];
+    if (next && word.endsWith('\u0646')) {
+      const target = next[0];
+      if (target === '\u0628') word = `${word.slice(0, -1)}\u0645`;
+      else if ('\u064A\u0631\u0645\u0644\u0648\u0646'.includes(target)) {
+        word = `${word.slice(0, -1)}${target}`;
+      }
+    }
+    out += word;
+  }
+  return out;
+}
+
 /** Match a token against the expected words starting at `expected[0]`. */
 export function matchAt(
   token: string,
@@ -234,12 +296,19 @@ export function matchAt(
   let best: WordMatch | null = single > 0 ? { span: 1, score: single } : null;
 
   for (let span = 2; span <= 3 && span <= expected.length; span++) {
-    const joined = expected.slice(0, span).join('');
-    if (token === joined) return { span, score: 1 };
+    const words = expected.slice(0, span);
+    const joined = words.join('');
+    // Idgham/iqlab across a word boundary changes the sound of a final noon:
+    // «من ربك» is heard «مر ربك», so the recognised token may match the
+    // assimilated join exactly.
+    const assimilated = assimilatedJoin(words);
+    if (token === joined || (!strict && token === assimilated)) {
+      return { span, score: 1 };
+    }
     // Only trust a fuzzy merged match when the token is clearly longer than a
     // single word, otherwise we would skip words on ordinary noisy matches.
     if (!strict && token.length >= 5) {
-      const score = similarity(token, joined);
+      const score = Math.max(similarity(token, joined), similarity(token, assimilated));
       if (score >= 0.85 && (!best || score > best.score)) {
         best = { span, score };
       }

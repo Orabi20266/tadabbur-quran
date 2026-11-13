@@ -77,6 +77,15 @@ describe('disconnected letters', () => {
     }
   });
 
+  it('reads «ألف» even when the engine writes it as 1000', () => {
+    for (const first of ['1000', '١٠٠٠', '1,000']) {
+      const h = harness(wordsForRange(2, 1, 1));
+      h.tracker.feed([first, 'لام', 'ميم']);
+      expect(h.cursor()).toBe(1);
+      expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    }
+  });
+
   it('accepts each surah opening the way it is recited', () => {
     const cases: [number, string[]][] = [
       [7, ['الف', 'لام', 'ميم', 'صاد']],

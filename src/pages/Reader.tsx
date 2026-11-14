@@ -128,9 +128,14 @@ export function Reader() {
     status: speechStatus,
     heard,
     supported: speechSupported,
+    biasing: speechBiasing,
     start: startSpeech,
     stop: stopSpeech,
-  } = useSpeech(handleTokens);
+  } = useSpeech(handleTokens, 'ar-SA', {
+    // The reader's position decides which words steer the engine; nothing here
+    // can reveal or advance a word on its own.
+    phrases: () => trackerRef.current?.biasPhrases(8) ?? [],
+  });
 
   const engineRef = useRef<SpeechEngine>(settings.speechEngine);
   const sessionIdRef = useRef<string | null>(null);
@@ -938,6 +943,13 @@ export function Reader() {
             حدث ذلك فاضغط الكلمة التي وصلت إليها ثم «تابع التتبّع من هذه الكلمة»،
             ولا يُحتسب ذلك خطأً.
           </p>
+          {speechBiasing ? (
+            <p className="muted small">
+              محرّكك يقبل توجيه السماع، فنمرّر إليه كلمات الآية القادمة فقط
+              ليتعرّف على الألفاظ القرآنية النادرة قبل أن يخمّنها. التوجيه لا
+              يفتح كلمة ولا يحرّك المؤشّر.
+            </p>
+          ) : null}
 
           <button
             className="btn btn-primary wide"

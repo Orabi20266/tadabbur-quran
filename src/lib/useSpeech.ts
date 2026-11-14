@@ -16,6 +16,8 @@ export interface Speech {
   /** Latest transcript, useful as "heard" feedback in the reader. */
   heard: string;
   supported: boolean;
+  /** The engine accepts contextual phrases, so the next words are passed to it. */
+  biasing: boolean;
   start: () => void;
   stop: () => void;
 }
@@ -25,6 +27,8 @@ interface Recognizer {
   continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
+  /** Contextual biasing; present only when the engine supports it. */
+  phrases?: unknown;
   onstart: (() => void) | null;
   onresult: ((event: SpeechResultEvent) => void) | null;
   onerror: ((event: SpeechErrorEvent) => void) | null;
@@ -56,6 +60,65 @@ interface SpeechErrorEvent {
 }
 
 type RecognizerCtor = new () => Recognizer;
+
+interface PhraseCtor {
+  new (text: string, boost?: number): unknown;
+}
+
+export interface SpeechOptions {
+  /**
+   * The words the reader is about to recite. Engines that support contextual
+   * biasing (Chrome 138+) get them as phrases, which makes rare Quranic words
+   * much more likely to be heard correctly. Ignored everywhere else.
+   */
+  phrases?: () => string[];
+}
+
+/** Chrome's attribute; absent from every engine that cannot bias. */
+function phraseCtor(): PhraseCtor | null {
+  if (typeof window === 'undefined') return null;
+  const ctor = (
+    window as unknown as { SpeechRecognitionPhrase?: PhraseCtor }
+  ).SpeechRecognitionPhrase;
+  return typeof ctor === 'function' ? ctor : null;
+}
+
+/**
+ * Turn the upcoming words into phrases with a falling boost: the two words at
+ * the cursor matter most, the rest only keep the engine's vocabulary warm.
+ * Duplicates are dropped because a repeated phrase is not a stronger hint.
+ *
+ * Chrome accepts 0–10. The boost stays well below the maximum: the goal is to
+ * stop rare Quranic words («دهاقاً»، «ألف») being misheard, not to talk the
+ * engine into hearing a word the reader did not say.
+ */
+export function biasPlan(texts: string[]): { text: string; boost: number }[] {
+  const seen = new Set<string>();
+  const plan: { text: string; boost: number }[] = [];
+  for (const raw of texts) {
+    const text = raw.trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    const boost = plan.length < 2 ? 8 : plan.length < 6 ? 5 : 2;
+    plan.push({ text, boost });
+    if (plan.length >= 60) break;
+  }
+  return plan;
+}
+
+function applyBias(rec: Recognizer, get?: () => string[]): boolean {
+  const Phrase = phraseCtor();
+  if (!Phrase || !get) return false;
+  const plan = biasPlan(get());
+  if (!plan.length) return false;
+  try {
+    rec.phrases = plan.map((phrase) => new Phrase(phrase.text, phrase.boost));
+    return true;
+  } catch {
+    // Engine without a working bias setter: recognition still runs unhinted.
+    return false;
+  }
+}
 
 /** Bare joining particles the recogniser sometimes splits off a word. */
 const JOINING_PARTICLE = new Set(['\u0648', '\u0641', '\u0628', '\u0644', '\u0643']);
@@ -95,8 +158,10 @@ function recognizerCtor(): RecognizerCtor | null {
 export function useSpeech(
   onTokens: (tokens: string[]) => void,
   lang = 'ar-SA',
+  options?: SpeechOptions,
 ): Speech {
   const supported = recognizerCtor() !== null;
+  const biasing = phraseCtor() !== null;
   const [status, setStatus] = useState<SpeechStatus>(
     supported ? 'idle' : 'unsupported',
   );
@@ -112,6 +177,8 @@ export function useSpeech(
   const consumedRef = useRef(0);
   const onTokensRef = useRef(onTokens);
   onTokensRef.current = onTokens;
+  const biasRef = useRef(options?.phrases);
+  biasRef.current = options?.phrases;
 
   const updateStatus = useCallback((next: SpeechStatus) => {
     statusRef.current = next;
@@ -139,6 +206,9 @@ export function useSpeech(
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
+    // Bias the engine towards the words that are coming next. Applied before
+    // every start, so each restart after a pause carries the current position.
+    applyBias(rec, biasRef.current);
 
     rec.onstart = () => {
       if (!activeRef.current || generationRef.current !== generation) return;
@@ -292,5 +362,5 @@ export function useSpeech(
 
   useEffect(() => stop, [stop]);
 
-  return { status, statusRef, heard, supported, start, stop };
+  return { status, statusRef, heard, supported, biasing, start, stop };
 }

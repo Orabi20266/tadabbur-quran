@@ -401,3 +401,30 @@ describe('TranscriptTracker', () => {
     expect(h.cursor()).toBe(13);
   });
 });
+
+describe('recogniser biasing', () => {
+  it('offers only the words still ahead, in recitation order', () => {
+    const h = makeTracker({ words: wordsForRange(112, 1, 2) });
+    expect(h.tracker.biasPhrases(3)).toEqual(['قل', 'هو', 'الله']);
+    h.tracker.feed(['قل']);
+    expect(h.tracker.biasPhrases(3)).toEqual(['هو', 'الله', 'احد']);
+  });
+
+  it('never lists a word the reader already passed', () => {
+    const h = makeTracker({ words: wordsForRange(112, 1, 1) });
+    h.tracker.feed(['قل', 'هو', 'الله', 'احد']);
+    expect(h.tracker.biasPhrases(5)).toEqual([]);
+  });
+
+  it('spells a disconnected-letters opening the way it is said', () => {
+    const h = makeTracker({ words: wordsForRange(2, 1, 1) });
+    expect(h.tracker.biasPhrases(1)).toEqual([
+      'ألف',
+      'لام',
+      'ميم',
+      'الم',
+    ]);
+    const yasin = makeTracker({ words: wordsForRange(36, 1, 1) });
+    expect(yasin.tracker.biasPhrases(1)[0]).toBe('ياسين');
+  });
+});

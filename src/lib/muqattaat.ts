@@ -76,6 +76,48 @@ const NAME: Record<string, string> = {
 /** Longest name first, so «سين» is not read as «سي» + «ن». */
 const NAMES = Object.keys(NAME).sort((a, b) => b.length - a.length);
 
+/** Letter → the name as it is written in a transcript, for biasing the engine. */
+const SPOKEN_NAME: Record<string, string> = {
+  '\u0627': '\u0623\u0644\u0641',
+  '\u0644': '\u0644\u0627\u0645',
+  '\u0645': '\u0645\u064A\u0645',
+  '\u0635': '\u0635\u0627\u062F',
+  '\u0631': '\u0631\u0627\u0621',
+  '\u0643': '\u0643\u0627\u0641',
+  '\u0647': '\u0647\u0627',
+  '\u064A': '\u064A\u0627',
+  '\u0639': '\u0639\u064A\u0646',
+  '\u0637': '\u0637\u0627',
+  '\u0633': '\u0633\u064A\u0646',
+  '\u062D': '\u062D\u0627',
+  '\u0642': '\u0642\u0627\u0641',
+  '\u0646': '\u0646\u0648\u0646',
+};
+
+/** Openings that are normally said as one word rather than letter by letter. */
+const MERGED: Record<string, string> = {
+  '\u064A\u0633': '\u064A\u0627\u0633\u064A\u0646',
+  '\u0637\u0647': '\u0637\u0627\u0647\u0627',
+  '\u062D\u0645': '\u062D\u0627\u0645\u064A\u0645',
+};
+
+/**
+ * How a reader is likely to say this opening, as plain words. Used to bias the
+ * speech recogniser towards these names; ordering is by likelihood, because the
+ * caller gives the first phrases the strongest boost.
+ */
+export function spokenPhrases(letters: string): string[] {
+  const out: string[] = [];
+  const merged = MERGED[letters];
+  if (merged) out.push(merged);
+  for (const letter of letters) {
+    const name = SPOKEN_NAME[letter];
+    if (name) out.push(name);
+  }
+  out.push(letters);
+  return out;
+}
+
 /**
  * Read a normalised token as a run of letter names. Returns the letters, or
  * null when the token is not made of names at all (an ordinary word).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { muqattaahAt, readLetterNames } from './muqattaat';
+import { muqattaahAt, readLetterNames, spokenPhrases } from './muqattaat';
 import { normalizeArabic, wordsForRange, wordsOf } from './quran';
 import { TranscriptTracker } from './tracker';
 import type { DetectorWord, EventType } from './types';
@@ -37,8 +37,7 @@ describe('disconnected letters', () => {
     expect(muqattaahAt(2, 1, 1)).toBeNull();
   });
 
-  it('reads the spoken letter names', () => {
-    expect(readLetterNames('الف')).toBe('ا');
+  it('reads the spoken letter names', () => {    expect(readLetterNames('الف')).toBe('ا');
     expect(readLetterNames('لام')).toBe('ل');
     expect(readLetterNames('ميم')).toBe('م');
     expect(readLetterNames('ياسين')).toBe('يس');
@@ -53,6 +52,23 @@ describe('disconnected letters', () => {
     // Ordinary words and the written form itself are not names.
     expect(readLetterNames('كفر')).toBeNull();
     expect(readLetterNames('الم')).toBeNull();
+  });
+
+  it('offers the spoken names so the engine can be biased towards them', () => {
+    expect(spokenPhrases('الم')).toEqual(['ألف', 'لام', 'ميم', 'الم']);
+    expect(spokenPhrases('كهيعص')).toEqual([
+      'كاف',
+      'ها',
+      'يا',
+      'عين',
+      'صاد',
+      'كهيعص',
+    ]);
+    // A merged name is what is actually said, so it comes first.
+    expect(spokenPhrases('يس')[0]).toBe('ياسين');
+    expect(spokenPhrases('طه')[0]).toBe('طاها');
+    expect(spokenPhrases('حم')[0]).toBe('حاميم');
+    expect(spokenPhrases('ن')).toEqual(['نون', 'ن']);
   });
 
   it('advances one word for three spoken names', () => {

@@ -1,5 +1,5 @@
 import { alignToken, matchAt, normalizeToken } from './align';
-import { muqattaahAt, readLetterNames } from './muqattaat';
+import { muqattaahAt, readLetterNames, spokenPhrases } from './muqattaat';
 import { tashkeelDiffers } from './quran';
 import type { DetectorWord, EventType } from './types';
 
@@ -75,6 +75,29 @@ export class TranscriptTracker {
 
   getCursor() {
     return this.cursor;
+  }
+
+  /**
+   * The words the reader is about to recite, as plain text the recogniser can
+   * be biased towards. Only words at or after the cursor are included, so the
+   * engine can never be nudged towards a word the reader has not reached yet.
+   * A disconnected-letters word expands to the letter names that are actually
+   * spoken.
+   */
+  biasPhrases(words = 10): string[] {
+    const out: string[] = [];
+    const end = Math.min(this.cfg.words.length, this.cursor + words);
+    for (let i = this.cursor; i < end; i++) {
+      const word = this.cfg.words[i];
+      const letters = muqattaahAt(word.surah, word.ayah, word.index);
+      if (letters) {
+        out.push(...spokenPhrases(letters));
+        continue;
+      }
+      const text = this.cfg.normalized[i];
+      if (text) out.push(text);
+    }
+    return out;
   }
 
   isBlocked() {

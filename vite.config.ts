@@ -4,6 +4,12 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   base: './',
+  define: {
+    __BUILD_ID__: JSON.stringify(
+      (process.env.GITHUB_SHA ?? '').slice(0, 7) ||
+        new Date().toISOString().slice(0, 10),
+    ),
+  },
   plugins: [
     react(),
     VitePWA({
@@ -28,6 +34,11 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,woff2,json}'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         navigateFallback: 'index.html',
+        // A new deployment must replace the old cache instead of waiting for
+        // every tab to close: readers keep this app open for long sessions.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
       },
     }),
   ],

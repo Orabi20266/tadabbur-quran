@@ -402,6 +402,76 @@ describe('TranscriptTracker', () => {
   });
 });
 
+describe('opening before the first word', () => {
+  it('swallows the basmalah and still tracks the surah opening', () => {
+    const h = makeTracker({ words: wordsForRange(2, 1, 2) });
+    h.tracker.feed(['بسم', 'الله', 'الرحمن', 'الرحيم']);
+    expect(h.cursor()).toBe(0);
+    expect(h.events).toHaveLength(0);
+    h.tracker.feed(['الف', 'لام', 'ميم']);
+    expect(h.cursor()).toBe(1);
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+  });
+
+  it('tolerates the isti\'adha before the basmalah', () => {
+    const h = makeTracker({ words: wordsForRange(2, 1, 1) });
+    h.tracker.feed([
+      'اعوذ', 'بالله', 'من', 'الشيطان', 'الرجيم',
+      'بسم', 'الله', 'الرحمن', 'الرحيم',
+      'الف', 'لام', 'ميم',
+    ]);
+    expect(h.cursor()).toBe(1);
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+  });
+
+  it('tolerates the long isti\'adha and a dropped long vowel', () => {
+    const h = makeTracker({ words: wordsForRange(2, 1, 1) });
+    h.tracker.feed([
+      'اعوذ', 'بالله', 'السميع', 'العليم', 'من', 'الشيطان', 'الرجيم',
+      'باسم', 'الله', 'الرحمان', 'الرحيم',
+      'الف', 'لام', 'ميم',
+    ]);
+    expect(h.cursor()).toBe(1);
+    expect(h.events).toHaveLength(1);
+    expect(h.events[0].type).toBe('correct');
+  });
+
+  it('does not swallow the basmalah when it is the ayah itself', () => {
+    const h = makeTracker({ words: wordsForRange(1, 1, 2) });
+    h.tracker.feed(['بسم', 'الله', 'الرحمن', 'الرحيم']);
+    expect(h.cursor()).toBe(4);
+    expect(h.events.every((e) => e.type === 'correct')).toBe(true);
+  });
+
+  it('does not swallow a first word the ayah really starts with', () => {
+    // Al-Baqarah 255 opens with «الله»; a basmalah before it is still ignored.
+    const h = makeTracker({ words: wordsForRange(2, 255, 255) });
+    h.tracker.feed(['بسم', 'الله', 'الرحمن', 'الرحيم', 'الله', 'لا', 'اله']);
+    expect(h.cursor()).toBe(3);
+    expect(h.events.map((e) => e.type)).toEqual([
+      'correct',
+      'correct',
+      'correct',
+    ]);
+  });
+
+  it('falls back to alignment when the opening stops early', () => {
+    const h = makeTracker({ words: wordsForRange(2, 1, 1) });
+    h.tracker.feed(['بسم', 'الله', 'الف', 'لام', 'ميم']);
+    expect(h.cursor()).toBe(1);
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+  });
+
+  it('only applies to the start of a session', () => {
+    const h = makeTracker({ words: wordsForRange(2, 1, 2) });
+    h.tracker.feed(['الف', 'لام', 'ميم']);
+    expect(h.cursor()).toBe(1);
+    // Re-saying the basmalah mid-session is not a free pass for real words.
+    h.tracker.feed(['بسم', 'بسم']);
+    expect(h.events.filter((e) => e.type === 'wrong')).toHaveLength(1);
+  });
+});
+
 describe('recogniser biasing', () => {
   it('offers only the words still ahead, in recitation order', () => {
     const h = makeTracker({ words: wordsForRange(112, 1, 2) });

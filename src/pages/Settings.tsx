@@ -11,6 +11,7 @@ import {
   Sun,
   Upload,
   MonitorSmartphone,
+  RefreshCw,
 } from 'lucide-react';
 import {
   exportState,
@@ -32,6 +33,10 @@ export function Settings() {
   const settings = useApp((s) => s.settings);
   const [msg, setMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const speechBiasing =
+    typeof window !== 'undefined' &&
+    typeof (window as unknown as { SpeechRecognitionPhrase?: unknown })
+      .SpeechRecognitionPhrase === 'function';
 
   const notify = (text: string) => {
     setMsg(text);
@@ -59,6 +64,27 @@ export function Settings() {
     if (!window.confirm('سيُحذف كل سجلك وعلامات حفظك على هذا الجهاز. متابعة؟')) return;
     resetAll();
     notify('أُعيد ضبط البيانات.');
+  };
+
+  /** Drop the service worker and its cache, then load the published bundle. */
+  const refreshApp = async () => {
+    if (
+      !window.confirm(
+        'سيُعاد تحميل التطبيق من آخر نسخة منشورة. بياناتك المحفوظة لا تُحذف. متابعة؟',
+      )
+    )
+      return;
+    try {
+      const regs = await navigator.serviceWorker?.getRegistrations?.();
+      await Promise.all((regs ?? []).map((reg) => reg.unregister()));
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+      }
+    } catch {
+      /* storage may be unavailable; a plain reload still helps */
+    }
+    window.location.reload();
   };
 
   return (
@@ -153,6 +179,11 @@ export function Settings() {
         <p className="muted small">
           في الوضع اليدوي تضغط «الكلمة التالية» بعد كل كلمة. هذا هو البديل عند رفض
           إذن الميكروفون أو عدم توفّر التعرّف الصوتي.
+        </p>
+        <p className="muted small">
+          {speechBiasing
+            ? 'توجيه السماع: مفعّل — تُمرَّر كلمات الآية القادمة إلى المحرّك ليتعرّف على الألفاظ القرآنية النادرة.'
+            : 'توجيه السماع: غير مدعوم في هذا المتصفح. استخدم Chrome حديثًا على الحاسب أو أندرويد لتحسين سماع الكلمات النادرة.'}
         </p>
       </section>
 
@@ -253,7 +284,18 @@ export function Settings() {
           محلياً داخل التطبيق. المرحلة التالية تستبدله بمحرّك مفتوح المصدر مستضاف
           ذاتياً عبر WebSocket.
         </p>
-        <p className="muted small">الإصدار 0.1.0</p>
+        <p className="muted small">
+          الإصدار 0.1.0 · بناء <span className="mono">{__BUILD_ID__}</span>
+        </p>
+        <div className="row wrap">
+          <button className="btn btn-secondary" onClick={() => void refreshApp()}>
+            <RefreshCw size={17} aria-hidden /> تحميل آخر نسخة
+          </button>
+        </div>
+        <p className="muted small">
+          إن بدا أن الرابط يعرض سلوكًا قديمًا، فهذا الزر يزيل نسخة الخدمة
+          المخزّنة ويعيد التحميل من الشبكة. لا يمسّ سجلك.
+        </p>
       </section>
     </div>
   );

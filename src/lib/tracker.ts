@@ -1,4 +1,4 @@
-import { alignToken, matchAt, normalizeToken } from './align';
+import { alignToken, matchAt, normalizeToken, wordScore } from './align';
 import { muqattaahAt, readLetterNames, spokenPhrases } from './muqattaat';
 import { tashkeelDiffers } from './quran';
 import type { DetectorWord, EventType } from './types';
@@ -8,8 +8,39 @@ export interface TrackerMeta {
   confidence?: number;
 }
 
-export interface TranscriptTrackerConfig {
-  words: DetectorWord[];
+/**
+ * What a reader says before the first word of a session: the isti'adha, the
+ * basmalah, or both. They are not part of the page being tracked, so hearing
+ * them must not be recorded as a mistake at the first word.
+ */
+const PREAMBLES: string[][] = [
+  ['بسم', 'الله', 'الرحمن', 'الرحيم'],
+  ['اعوذ', 'بالله'],
+  ['اعوذ', 'بالله', 'من', 'الشيطان', 'الرجيم'],
+  ['اعوذ', 'بالله', 'السميع', 'العليم', 'من', 'الشيطان', 'الرجيم'],
+  ['اعوذ', 'بالله', 'من', 'الشيطان', 'الرجيم', 'بسم', 'الله', 'الرحمن', 'الرحيم'],
+  [
+    'اعوذ',
+    'بالله',
+    'السميع',
+    'العليم',
+    'من',
+    'الشيطان',
+    'الرجيم',
+    'بسم',
+    'الله',
+    'الرحمن',
+    'الرحيم',
+  ],
+];
+
+/** Compare preamble words without long vowels, so «باسم»/«الرحمان» still count. */
+function looseSame(heard: string, expected: string): boolean {
+  const skeleton = (word: string) => word.replace(/[اوىيء]/g, '');
+  return heard === expected || skeleton(heard) === skeleton(expected);
+}
+
+export interface TranscriptTrackerConfig {  words: DetectorWord[];
   /** Normalised text of every word, same order and length as `words`. */
   normalized: string[];
   /** Fully diacritized text of every word, same order as `normalized`. */
@@ -68,6 +99,12 @@ export class TranscriptTracker {
    * on or the names do not follow the expected order.
    */
   private letterRun: { key: string; heard: string; letters: string } | null = null;
+  /**
+   * Leading tokens of the isti'adha/basmalah while the reader is still before
+   * the first tracked word. Kept only for prefix matching; it never advances
+   * the cursor and never emits an event.
+   */
+  private preamble: string[] = [];
 
   constructor(cfg: TranscriptTrackerConfig) {
     this.cfg = cfg;
@@ -140,6 +177,7 @@ export class TranscriptTracker {
     this.pendingRewind = null;
     this.pendingUnknown = null;
     this.letterRun = null;
+    this.preamble = [];
     this.setBlocked(false);
     this.cfg.onCursor(this.cursor);
     if (this.cursor >= this.cfg.normalized.length) this.finish();
@@ -223,8 +261,7 @@ export class TranscriptTracker {
   }
 
   /** One mushaf word recited as several letter names: advance exactly one word. */
-  private completeLetters(spoken: string): void {
-    const word = this.cfg.words[this.cursor];
+  private completeLetters(spoken: string): void {    const word = this.cfg.words[this.cursor];
     if (!word) return;
     this.pendingUnknown = null;
     this.emit(word, 'correct', { recitedText: spoken, confidence: 1 });
@@ -233,6 +270,48 @@ export class TranscriptTracker {
     if (this.blocked) this.setBlocked(false);
     this.cfg.onCursor(this.cursor);
     if (this.cursor >= this.cfg.normalized.length) this.finish();
+  }
+
+  /**
+   * Swallow the isti'adha/basmalah said before the session's first word.
+   * Returns true when the token belonged to that opening, so neither alignment
+   * nor mistake detection sees it. A token that matches the expected first word
+   * is never swallowed: Al-Fatihah *is* the basmalah, and some ayahs open with
+   * «الله» or «من».
+   */
+  private handlePreamble(token: string): boolean {
+    if (this.cursor !== 0) {
+      this.preamble = [];
+      return false;
+    }
+    const expected = this.cfg.normalized[0] ?? '';
+    // Only a *fresh* opening may be refused: the second word of the basmalah is
+    // «الله», which is also the first word of ayahs such as 2:255, and it must
+    // still count as part of the opening there.
+    if (this.preamble.length === 0 && expected && wordScore(token, expected) > 0) {
+      return false;
+    }
+
+    const next = [...this.preamble, token];
+    const matching = PREAMBLES.filter(
+      (sequence) =>
+        sequence.length >= next.length &&
+        next.every((heard, i) => looseSame(heard, sequence[i])),
+    );
+    if (matching.length === 0) {
+      this.preamble = [];
+      return false;
+    }
+
+    // A completed opening stays in the buffer while it can still grow
+    // («أعوذ بالله» → «من الشيطان الرجيم»); otherwise it is finished.
+    this.pendingUnknown = null;
+    if (matching.some((sequence) => sequence.length > next.length)) {
+      this.preamble = next;
+    } else {
+      this.preamble = [];
+    }
+    return true;
   }
 
   private handleToken(raw: string): void {
@@ -246,6 +325,10 @@ export class TranscriptTracker {
       this.finish();
       return;
     }
+
+    // The isti'adha and basmalah are said before the first word of a session
+    // but are not part of the page; swallow them instead of blaming the reader.
+    if (!this.pendingRewind && this.handlePreamble(token)) return;
 
     // The disconnected letters are written as one word but recited as several
     // letter names. Check them before ordinary alignment so the extra tokens do
@@ -445,6 +528,7 @@ export class TranscriptTracker {
     this.pendingRewind = null;
     this.pendingUnknown = null;
     this.letterRun = null;
+    this.preamble = [];
     for (let i = 0; i < count; i++) {
       const word = this.cfg.words[this.cursor];
       if (!word) break;

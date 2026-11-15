@@ -8,6 +8,7 @@ import {
   Palette,
   RotateCcw,
   SlidersHorizontal,
+  Sparkles,
   Sun,
   Upload,
   MonitorSmartphone,
@@ -21,6 +22,7 @@ import {
   useApp,
 } from '../lib/store';
 import type { Theme } from '../lib/types';
+import { hasSharedSpeech } from '../lib/config';
 import { ToggleRow } from '../components/ToggleRow';
 
 const themes: { id: Theme; label: string; icon: typeof Sun }[] = [
@@ -162,6 +164,16 @@ export function Settings() {
           </button>
           <button
             role="radio"
+            aria-checked={settings.speechEngine === 'gemini'}
+            className={settings.speechEngine === 'gemini' ? 'is-active' : ''}
+            onClick={() =>
+              updateSettings({ speechEngine: 'gemini', speechConsent: true })
+            }
+          >
+            <Sparkles size={16} aria-hidden /> Gemini
+          </button>
+          <button
+            role="radio"
             aria-checked={settings.speechEngine === 'manual'}
             className={settings.speechEngine === 'manual' ? 'is-active' : ''}
             onClick={() =>
@@ -184,6 +196,66 @@ export function Settings() {
           {speechBiasing
             ? 'توجيه السماع: مفعّل — تُمرَّر كلمات الآية القادمة إلى المحرّك ليتعرّف على الألفاظ القرآنية النادرة.'
             : 'توجيه السماع: غير مدعوم في هذا المتصفح. استخدم Chrome حديثًا على الحاسب أو أندرويد لتحسين سماع الكلمات النادرة.'}
+        </p>
+      </section>
+
+      <section className="card settings-card">
+        <h2 className="section-title">
+          <Sparkles size={17} aria-hidden /> محرّك Gemini
+        </h2>
+        <p className="muted small">
+          محرّك المتصفح يكتب التلاوة بلا تشكيل ويخلط الحروف المتقاربة (ق/ك، ص/س)،
+          فلا يستطيع التتبّع كشف خطأ الحركة. Gemini يسمع الصوت ويعيد الكلمات
+          بالحركات، فيُكشف خطأ التشكيل وأحكام التجويد. الصوت يُرسل إلى Google عند
+          استخدام هذا المحرّك فقط.
+        </p>
+        {hasSharedSpeech ? (
+          <p className="muted small">
+            التعرّف الصوتي جاهز لجميع زوار الموقع عبر وسيط آمن يحفظ المفتاح على
+            الخادم — لا تحتاج إلى إضافة مفتاح. الحقول أدناه اختيارية.
+          </p>
+        ) : null}
+        <label className="field">
+          <span>{hasSharedSpeech ? 'مفتاحك الخاص (اختياري)' : 'مفتاح Gemini API'}</span>
+          <input
+            type="password"
+            dir="ltr"
+            autoComplete="off"
+            placeholder="AIza..."
+            value={settings.geminiKey}
+            onChange={(e) => updateSettings({ geminiKey: e.target.value.trim() })}
+          />
+        </label>
+        <label className="field">
+          <span>النموذج</span>
+          <input
+            type="text"
+            dir="ltr"
+            autoComplete="off"
+            placeholder="gemini-3.6-flash"
+            value={settings.geminiModel}
+            onChange={(e) =>
+              updateSettings({ geminiModel: e.target.value.trim() })
+            }
+          />
+        </label>
+        <label className="field">
+          <span>وسيط بديل (اختياري)</span>
+          <input
+            type="text"
+            dir="ltr"
+            autoComplete="off"
+            placeholder="http://localhost:5678/webhook/tadabbur-audit"
+            value={settings.geminiEndpoint}
+            onChange={(e) =>
+              updateSettings({ geminiEndpoint: e.target.value.trim() })
+            }
+          />
+        </label>
+        <p className="muted small">
+          المفتاح يُخزَّن في متصفّحك فقط (localStorage). إن كان الوسيط مضبوطاً
+          فيُستخدم هو ويُتجاهل المفتاح، وهذا أفضل للنشر العام لأن المفتاح يبقى على
+          الخادم.
         </p>
       </section>
 

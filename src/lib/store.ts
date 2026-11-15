@@ -23,6 +23,9 @@ export const defaultSettings: Settings = {
   goalAyahs: 5,
   speechEngine: 'browser',
   speechConsent: false,
+  geminiKey: '',
+  geminiEndpoint: '',
+  geminiModel: 'gemini-3.6-flash',
 };
 
 const defaultState: AppState = {

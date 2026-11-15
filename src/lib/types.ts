@@ -2,7 +2,7 @@ export type Theme = 'light' | 'dark' | 'system';
 
 export type EventType = 'correct' | 'wrong' | 'tashkeel' | 'peek';
 export type WordStatus = 'neutral' | EventType;
-export type SpeechEngine = 'browser' | 'manual';
+export type SpeechEngine = 'browser' | 'gemini' | 'manual';
 
 export interface Settings {
   theme: Theme;
@@ -18,6 +18,12 @@ export interface Settings {
   speechEngine: SpeechEngine;
   /** The reader has seen the browser speech disclosure and chosen an engine. */
   speechConsent: boolean;
+  /** Gemini API key, used by the Gemini speech engine. Stored locally only. */
+  geminiKey: string;
+  /** Optional proxy endpoint (e.g. an n8n webhook) so the key stays server-side. */
+  geminiEndpoint: string;
+  /** Gemini model used for transcription. */
+  geminiModel: string;
 }
 
 export interface Mistake {

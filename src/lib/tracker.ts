@@ -1,5 +1,11 @@
-import { alignToken, matchAt, normalizeToken, wordScore } from './align';
-import { muqattaahAt, readLetterNames, spokenPhrases } from './muqattaat';
+import {
+  alignToken,
+  matchAt,
+  normalizeToken,
+  phoneticSimilarity,
+  wordScore,
+} from './align';
+import { muqattaahAt, readLetterSpelling, spokenPhrases } from './muqattaat';
 import { tashkeelDiffers } from './quran';
 import type { DetectorWord, EventType } from './types';
 
@@ -141,6 +147,11 @@ export class TranscriptTracker {
     return this.blocked;
   }
 
+  /** True once every word on this page has been recited. */
+  isDone() {
+    return this.done;
+  }
+
   /** New recognised tokens, in order. Only the hook feeds this. */
   feed(tokens: string[]): void {
     if (this.done) return;
@@ -232,7 +243,16 @@ export class TranscriptTracker {
       return true;
     }
 
-    const letters = readLetterNames(token);
+    // A recogniser may write the whole opening as one near-homophone,
+    // «آلام»/«ألام» for «الم». The word is still the opening, so accept it
+    // while the cursor is on it; the graph only moves one word.
+    if (mq.length >= 2 && phoneticSimilarity(token, mq) >= 0.8) {
+      this.letterRun = null;
+      this.completeLetters(heard);
+      return true;
+    }
+
+    const letters = readLetterSpelling(token);
     if (!letters) {
       // An ordinary word: the reader is not spelling the letters out.
       this.letterRun = null;
@@ -261,7 +281,8 @@ export class TranscriptTracker {
   }
 
   /** One mushaf word recited as several letter names: advance exactly one word. */
-  private completeLetters(spoken: string): void {    const word = this.cfg.words[this.cursor];
+  private completeLetters(spoken: string): void {
+    const word = this.cfg.words[this.cursor];
     if (!word) return;
     this.pendingUnknown = null;
     this.emit(word, 'correct', { recitedText: spoken, confidence: 1 });

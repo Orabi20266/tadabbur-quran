@@ -46,7 +46,7 @@ export function splitTranscript(text: string): string[] {
     .split(/\s+/)
     .map((token) =>
       token.replace(
-        /[^\u0621-\u064A\u064B-\u065F\u0670\u06D6-\u06ED0-9\u0660-\u0669]/g,
+        /[^\u0621-\u064A\u064B-\u065F\u0670\u0671\u06D6-\u06ED0-9\u0660-\u0669]/g,
         '',
       ),
     )

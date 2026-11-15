@@ -51,6 +51,7 @@ import type {
 import { TranscriptTracker } from '../lib/tracker';
 import type { TrackerMeta } from '../lib/tracker';
 import { playMistakeSound, primeMistakeSound } from '../lib/sound';
+import { muqattaahAt, spokenHint } from '../lib/muqattaat';
 import { useSpeech } from '../lib/useSpeech';
 import { Sheet } from '../components/Sheet';
 import { WordSpan } from '../components/WordSpan';
@@ -120,9 +121,19 @@ export function Reader() {
 
   const trackerRef = useRef<TranscriptTracker | null>(null);
   const pausedRef = useRef(false);
+  /**
+   * Tokens heard while the tracker is between pages. The reader recites through
+   * the page boundary without pausing, so anything heard in the moment before
+   * the next page's tracker exists waits here instead of being dropped.
+   */
+  const pendingTokensRef = useRef<string[]>([]);
   const handleTokens = useCallback((tokens: string[]) => {
     if (pausedRef.current) return;
-    trackerRef.current?.feed(tokens);
+    for (const token of tokens) {
+      const tracker = trackerRef.current;
+      if (!tracker || tracker.isDone()) pendingTokensRef.current.push(token);
+      else tracker.feed([token]);
+    }
   }, []);
   const {
     status: speechStatus,
@@ -139,6 +150,13 @@ export function Reader() {
 
   const engineRef = useRef<SpeechEngine>(settings.speechEngine);
   const sessionIdRef = useRef<string | null>(null);
+  /** The ayah the session began at, kept across page advances. */
+  const sessionStartRef = useRef(ayahParam);
+  /**
+   * Set while the tracker is being rebuilt for the next page, so the effect
+   * cleanup does not stop the microphone the reader is still speaking into.
+   */
+  const pageAdvanceRef = useRef(false);
   const startedAtRef = useRef(0);
   const errorsRef = useRef(0);
   const wordsRef = useRef(0);
@@ -204,6 +222,7 @@ export function Reader() {
       // The session owns its starting ayah. Everything before it is outside the
       // word list, so it can never be marked as a skipped word or a mistake.
       setSessionStart(startAt);
+      sessionStartRef.current = startAt;
       if (startAt !== ayahParam || searchParams.has('session')) {
         const params = new URLSearchParams(searchParams);
         params.set('ayah', String(startAt));
@@ -223,6 +242,7 @@ export function Reader() {
       revealedRef.current = {};
       ayahCountRef.current = {};
       doneSetRef.current = new Set();
+      pendingTokensRef.current = [];
       setErrors(0);
       statusesRef.current = {};
       setStatuses({});
@@ -251,13 +271,14 @@ export function Reader() {
     const id = sessionIdRef.current;
     if (!id) return;
     trackerRef.current = null;
+    pendingTokensRef.current = [];
     stopSpeech();
     pausedRef.current = false;
     const endedAt = Date.now();
     const session: Session = {
       id,
       surah,
-      fromAyah: from,
+      fromAyah: sessionStartRef.current,
       toAyah: to,
       startedAt: startedAtRef.current,
       endedAt,
@@ -281,7 +302,7 @@ export function Reader() {
     setPaused(false);
     setBlockedWord(null);
     setCursor(0);
-  }, [from, hidden, stopSpeech, surah, to]);
+  }, [hidden, stopSpeech, surah, to]);
 
   finishRef.current = finishSession;
 
@@ -360,7 +381,25 @@ export function Reader() {
   );
 
   doneRef.current = () => {
-    if (sessionIdRef.current) finishRef.current();
+    if (!sessionIdRef.current) return;
+    const view = viewRef.current;
+    // Finishing a page continues on the next one instead of ending the session.
+    // The reader stays in memorisation mode and the new page is hidden as well;
+    // if they stop reciting, nothing advances on its own and the session stays
+    // open until they end it or leave. Reciting past the last page ends it.
+    if (view.to < sData.total_verses) {
+      const next = view.to + 1;
+      pageAdvanceRef.current = true;
+      setSessionStart(next);
+      setCursor(0);
+      const params = new URLSearchParams(searchParams);
+      params.set('ayah', String(next));
+      params.delete('session');
+      setSearchParams(params, { replace: true });
+      showToast(`انتهت الصفحة — تابع من الآية ${arabicNumber(next)}`);
+      return;
+    }
+    finishRef.current();
   };
 
   // Tracker lifecycle for the live session. The cursor advances only when the
@@ -389,6 +428,14 @@ export function Reader() {
       onCursor: (i) => setCursor(i),
     });
     trackerRef.current = tracker;
+    // A reader who recites through the page boundary already produced the first
+    // tokens of this page while the previous tracker was finished; give them to
+    // the new tracker now.
+    if (pendingTokensRef.current.length) {
+      const queued = pendingTokensRef.current;
+      pendingTokensRef.current = [];
+      tracker.feed(queued);
+    }
     if (import.meta.env.DEV) {
       // Test hook for local verification only; stripped from production builds.
       (window as unknown as { __tadabbur?: TranscriptTracker }).__tadabbur =
@@ -400,11 +447,14 @@ export function Reader() {
       if (import.meta.env.DEV) {
         delete (window as unknown as { __tadabbur?: TranscriptTracker }).__tadabbur;
       }
-      stopSpeech();
+      // A page advance replaces the tracker but not the recitation: keep the
+      // microphone running so the reader continues without a gap.
+      if (!pageAdvanceRef.current) stopSpeech();
+      pageAdvanceRef.current = false;
     };
     // Session options are captured when the session starts on purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, sessionId]);
+  }, [phase, sessionId, from]);
 
   const wrappedEvent = useCallback(
     (w: DetectorWord, t: EventType, meta?: TrackerMeta) => {
@@ -439,7 +489,7 @@ export function Reader() {
         endSession({
           id,
           surah: view.surah,
-          fromAyah: view.from,
+          fromAyah: sessionStartRef.current,
           toAyah: view.to,
           startedAt: startedAtRef.current,
           endedAt: Date.now(),
@@ -582,6 +632,10 @@ export function Reader() {
     [surah, from, to],
   );
   const currentKey = phase === 'live' ? flatWords[cursor]?.key : undefined;
+  const currentWord = phase === 'live' ? flatWords[cursor] : undefined;
+  const lettersWord = currentWord
+    ? muqattaahAt(currentWord.surah, currentWord.ayah, currentWord.index)
+    : null;
 
   const closeHistory = () => setHistoryWord(null);
 
@@ -710,6 +764,15 @@ export function Reader() {
         <div className="heard-line" dir="rtl">
           <span className="muted small">سمعنا:</span>
           <span>{heard}</span>
+        </div>
+      ) : null}
+
+      {phase === 'live' && lettersWord ? (
+        <div className="letters-hint" dir="rtl">
+          <Sparkles size={14} aria-hidden />
+          <span>
+            الحروف المقطّعة — تُقرأ: <strong>{spokenHint(lettersWord)}</strong>
+          </span>
         </div>
       ) : null}
 

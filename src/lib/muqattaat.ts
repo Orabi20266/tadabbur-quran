@@ -73,8 +73,77 @@ const NAME: Record<string, string> = {
   نون: 'ن',
 };
 
+/**
+ * The same names as the recogniser often writes them. A browser engine adds a
+ * tanween («ألفاً»), drops the alef of «كاف», or hears «ألف» as «آلاف»; none of
+ * these change what the reader said. Reading them is only ever attempted while
+ * the cursor sits on a disconnected-letters word, so an alias can never alter
+ * the meaning of an ordinary word elsewhere.
+ */
+const ALIAS: Record<string, string> = {
+  الفا: 'ا',
+  الاف: 'ا',
+  لاما: 'ل',
+  لا: 'ل',
+  ميما: 'م',
+  مين: 'م',
+  صادا: 'ص',
+  كافا: 'ك',
+  كف: 'ك',
+  عينا: 'ع',
+  سينا: 'س',
+  قافا: 'ق',
+  نونا: 'ن',
+  راء: 'ر',
+  هاا: 'ه',
+  ياا: 'ي',
+  طاا: 'ط',
+  حاا: 'ح',
+};
+
+/**
+ * A bare letter, as some engines write an isolated name. It is only read at a
+ * disconnected-letters word, where a single «م» can only mean the name.
+ */
+const BARE: Record<string, string> = {
+  ا: 'ا',
+  ل: 'ل',
+  م: 'م',
+  ص: 'ص',
+  ر: 'ر',
+  ك: 'ك',
+  ه: 'ه',
+  ي: 'ي',
+  ع: 'ع',
+  ط: 'ط',
+  س: 'س',
+  ح: 'ح',
+  ق: 'ق',
+  ن: 'ن',
+};
+
+const NAME_LOOKUP: Record<string, string> = { ...NAME, ...ALIAS };
+const SPELL_LOOKUP: Record<string, string> = { ...NAME_LOOKUP, ...BARE };
+
 /** Longest name first, so «سين» is not read as «سي» + «ن». */
-const NAMES = Object.keys(NAME).sort((a, b) => b.length - a.length);
+const NAMES = Object.keys(NAME_LOOKUP).sort((a, b) => b.length - a.length);
+const SPELLINGS = Object.keys(SPELL_LOOKUP).sort((a, b) => b.length - a.length);
+
+function parseNames(
+  token: string,
+  names: string[],
+  lookup: Record<string, string>,
+): string | null {
+  let rest = token;
+  let letters = '';
+  while (rest.length > 0) {
+    const name = names.find((candidate) => rest.startsWith(candidate));
+    if (!name) return null;
+    letters += lookup[name];
+    rest = rest.slice(name.length);
+  }
+  return letters || null;
+}
 
 /** Letter → the name as it is written in a transcript, for biasing the engine. */
 const SPOKEN_NAME: Record<string, string> = {
@@ -119,17 +188,31 @@ export function spokenPhrases(letters: string): string[] {
 }
 
 /**
- * Read a normalised token as a run of letter names. Returns the letters, or
+ * The opening as a reader should say it, for the in-reader hint. Uses the
+ * merged name when there is one («يس» → «ياسين») and the letter names
+ * otherwise («الم» → «ألف لام ميم»).
+ */
+export function spokenHint(letters: string): string {
+  const merged = MERGED[letters];
+  if (merged) return merged;
+  return [...letters]
+    .map((letter) => SPOKEN_NAME[letter] ?? letter)
+    .join(' ');
+}
+
+/**
+ * Read a token that is made of spoken letter names. Returns the letters, or
  * null when the token is not made of names at all (an ordinary word).
  */
 export function readLetterNames(token: string): string | null {
-  let rest = token;
-  let letters = '';
-  while (rest.length > 0) {
-    const name = NAMES.find((candidate) => rest.startsWith(candidate));
-    if (!name) return null;
-    letters += NAME[name];
-    rest = rest.slice(name.length);
-  }
-  return letters || null;
+  return parseNames(token, NAMES, NAME_LOOKUP);
+}
+
+/**
+ * Like `readLetterNames`, but also accepts bare letters («ا ل م») and merged
+ * bare letters («لم»), which some engines produce for isolated names. Only the
+ * tracker calls this while the cursor is on a disconnected-letters word.
+ */
+export function readLetterSpelling(token: string): string | null {
+  return parseNames(token, SPELLINGS, SPELL_LOOKUP);
 }

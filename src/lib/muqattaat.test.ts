@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { muqattaahAt, readLetterNames, spokenPhrases } from './muqattaat';
+import {
+  muqattaahAt,
+  readLetterNames,
+  readLetterSpelling,
+  spokenHint,
+  spokenPhrases,
+} from './muqattaat';
 import { normalizeArabic, wordsForRange, wordsOf } from './quran';
 import { TranscriptTracker } from './tracker';
 import type { DetectorWord, EventType } from './types';
@@ -37,7 +43,8 @@ describe('disconnected letters', () => {
     expect(muqattaahAt(2, 1, 1)).toBeNull();
   });
 
-  it('reads the spoken letter names', () => {    expect(readLetterNames('الف')).toBe('ا');
+  it('reads the spoken letter names', () => {
+    expect(readLetterNames('الف')).toBe('ا');
     expect(readLetterNames('لام')).toBe('ل');
     expect(readLetterNames('ميم')).toBe('م');
     expect(readLetterNames('ياسين')).toBe('يس');
@@ -52,6 +59,27 @@ describe('disconnected letters', () => {
     // Ordinary words and the written form itself are not names.
     expect(readLetterNames('كفر')).toBeNull();
     expect(readLetterNames('الم')).toBeNull();
+    // Bare letters are only read as a spelling, at a letters word.
+    expect(readLetterSpelling('ا')).toBe('ا');
+    expect(readLetterSpelling('لم')).toBe('لم');
+    expect(readLetterSpelling('الم')).toBe('الم');
+  });
+
+  it('reads the variants a browser recogniser produces', () => {
+    // Tanween on a name, a dropped alef, and «ألف» heard as «آلاف».
+    expect(readLetterNames('الفا')).toBe('ا');
+    expect(readLetterNames('الاف')).toBe('ا');
+    expect(readLetterNames('لاما')).toBe('ل');
+    expect(readLetterNames('كف')).toBe('ك');
+    expect(readLetterNames('مين')).toBe('م');
+    expect(readLetterNames('نونا')).toBe('ن');
+  });
+
+  it('describes how the opening is said', () => {
+    expect(spokenHint('الم')).toBe('ألف لام ميم');
+    expect(spokenHint('كهيعص')).toBe('كاف ها يا عين صاد');
+    expect(spokenHint('يس')).toBe('ياسين');
+    expect(spokenHint('ص')).toBe('صاد');
   });
 
   it('offers the spoken names so the engine can be biased towards them', () => {
@@ -93,8 +121,29 @@ describe('disconnected letters', () => {
     }
   });
 
-  it('reads «ألف» even when the engine writes it as 1000', () => {
-    for (const first of ['1000', '١٠٠٠', '1,000']) {
+  it('accepts bare letters and names with a tanween', () => {
+    for (const spoken of [
+      ['ا', 'ل', 'م'],
+      ['الفا', 'لاما', 'ميما'],
+      ['الاف', 'لام', 'ميم'],
+    ]) {
+      const h = harness(wordsForRange(2, 1, 1));
+      h.tracker.feed(spoken);
+      expect(h.cursor()).toBe(1);
+      expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    }
+  });
+
+  it('accepts the whole opening as one near-homophone', () => {
+    for (const spoken of ['الام', 'آلام']) {
+      const h = harness(wordsForRange(2, 1, 1));
+      h.tracker.feed([spoken]);
+      expect(h.cursor()).toBe(1);
+      expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    }
+  });
+
+  it('reads «ألف» even when the engine writes it as 1000', () => {    for (const first of ['1000', '١٠٠٠', '1,000']) {
       const h = harness(wordsForRange(2, 1, 1));
       h.tracker.feed([first, 'لام', 'ميم']);
       expect(h.cursor()).toBe(1);

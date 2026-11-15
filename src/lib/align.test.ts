@@ -31,6 +31,13 @@ describe('transcript tokenization', () => {
     // The transcript splitter must not throw the digits away first.
     expect(splitTranscript('1000 لام ميم')).toEqual(['1000', 'لام', 'ميم']);
   });
+
+  it('keeps the alef wasla of an Uthmani transcript', () => {
+    // Some engines echo the mushaf spelling; dropping ٱ turned «ٱلْكِتَٰبُ»
+    // into «لكتاب» and made the word look wrong.
+    expect(splitTranscript('ٱلۡكِتَٰبُ')).toEqual(['ٱلۡكِتَٰبُ']);
+    expect(tokenizeTranscript('ٱلۡكِتَٰبُ')).toEqual(['الكتاب']);
+  });
 });
 
 describe('word matching', () => {

@@ -8,6 +8,7 @@ import type {
   Settings,
   WordStat,
 } from './types';
+import { hasSharedSpeech } from './config';
 
 export const STORAGE_KEY = 'tadabbur.v1';
 
@@ -21,7 +22,8 @@ export const defaultSettings: Settings = {
   errorRate: 0.12,
   paceMs: 850,
   goalAyahs: 5,
-  speechEngine: 'browser',
+  // الوسيط المشترك يجعل Gemini متاحاً للجميع بلا مفتاح، فيكون هو الافتراضي.
+  speechEngine: hasSharedSpeech ? 'gemini' : 'browser',
   speechConsent: false,
   geminiKey: '',
   geminiEndpoint: '',
@@ -46,10 +48,14 @@ function load(): AppState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState;
     const parsed = JSON.parse(raw) as Partial<AppState>;
+    const settings = { ...defaultSettings, ...(parsed.settings ?? {}) };
+    // قارئ لم يختر محرّكاً بعد: يستفيد من الوسيط المشترك فوراً بدل محرّك
+    // المتصفح الأضعف. من اختار صراحةً (speechConsent) يبقى على اختياره.
+    if (hasSharedSpeech && !settings.speechConsent) settings.speechEngine = 'gemini';
     return {
       ...defaultState,
       ...parsed,
-      settings: { ...defaultSettings, ...(parsed.settings ?? {}) },
+      settings,
       streak: { ...defaultState.streak, ...(parsed.streak ?? {}) },
       lastRead: { ...defaultState.lastRead, ...(parsed.lastRead ?? {}) },
     };

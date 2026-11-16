@@ -1039,12 +1039,22 @@ export function Reader() {
           </p>
 
           {!settings.speechConsent ? (
-            <p>
-              التتبّع الصوتي يستخدم محرّك التعرّف في متصفحك. قد يعالج المتصفح الصوت
-              في خدمة سحابية تابعة لمزوّده؛{' '}
-              <strong>تدبّر لا يسجّل صوتك ولا يخزّنه</strong>، ولا يحفظ إلا الكلمات
-              التي تعرّف عليها.
-            </p>
+            hasSharedSpeech ? (
+              <p>
+                التتبّع الصوتي يستخدم Gemini لسماع تلاوتك وإعادة كلماتها مشكَّلة،
+                فيُكشف خطأ الحركة وأحكام التجويد. تُرسل مقاطع قصيرة من صوتك إلى
+                Google عند التلاوة فقط؛{' '}
+                <strong>تدبّر لا يسجّل صوتك ولا يخزّنه</strong>، ولا يحفظ إلا
+                الكلمات التي تعرّف عليها.
+              </p>
+            ) : (
+              <p>
+                التتبّع الصوتي يستخدم محرّك التعرّف في متصفحك. قد يعالج المتصفح
+                الصوت في خدمة سحابية تابعة لمزوّده؛{' '}
+                <strong>تدبّر لا يسجّل صوتك ولا يخزّنه</strong>، ولا يحفظ إلا
+                الكلمات التي تعرّف عليها.
+              </p>
+            )
           ) : null}
           <p className="muted small">
             لا يتقدّم التتبّع بالمؤقّت أو الصمت: كل كلمة تُفتح فقط عندما يسمعها
@@ -1065,12 +1075,25 @@ export function Reader() {
 
           <button
             className="btn btn-primary wide"
-            onClick={() => chooseEngine('browser')}
-            disabled={!speechSupported}
+            onClick={() => chooseEngine(hasSharedSpeech ? 'gemini' : 'browser')}
+            disabled={hasSharedSpeech ? false : !speechSupported}
           >
-            <Mic size={18} aria-hidden /> ابدأ بالتعرّف الصوتي
+            {hasSharedSpeech ? (
+              <Sparkles size={18} aria-hidden />
+            ) : (
+              <Mic size={18} aria-hidden />
+            )}{' '}
+            ابدأ بالتعرّف الصوتي{hasSharedSpeech ? ' — Gemini' : ''}
           </button>
-          {!speechSupported ? (
+          {hasSharedSpeech && speechSupported ? (
+            <button
+              className="btn btn-secondary wide"
+              onClick={() => chooseEngine('browser')}
+            >
+              <Mic size={18} aria-hidden /> استخدام تعرّف المتصفح بدلاً منه
+            </button>
+          ) : null}
+          {!speechSupported && !hasSharedSpeech ? (
             <p className="muted small center">
               هذا المتصفح لا يوفّر التعرّف الصوتي، لذا سيعمل التتبّع اليدوي فقط.
             </p>

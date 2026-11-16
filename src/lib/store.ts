@@ -127,11 +127,27 @@ export function recordEvent(args: RecordEventArgs): Mistake | null {
   const prev = state.wordStats[args.wordKey];
   const stat: WordStat = prev ?? { recited: 0, correct: 0, wrong: 0, streak: 0, lastAt: at };
   const isCorrect = args.type === 'correct';
+
+  // A word the reader goes back and recites correctly is not an error: the
+  // active mistake is resolved below and its count is taken back out of the
+  // statistics, so the word does not stay marked red or keep appearing among
+  // the words that need review. Only mistakes from this session and this word
+  // are rolled back; earlier sessions keep their history.
+  const resolved =
+    isCorrect && args.sessionId
+      ? state.mistakes.filter(
+          (m) =>
+            !m.removed &&
+            m.sessionId === args.sessionId &&
+            m.wordKey === args.wordKey,
+        ).length
+      : 0;
+
   const nextStat: WordStat = {
     ...stat,
     recited: stat.recited + 1,
     correct: stat.correct + (isCorrect ? 1 : 0),
-    wrong: stat.wrong + (isCorrect ? 0 : 1),
+    wrong: Math.max(0, stat.wrong + (isCorrect ? -resolved : 1)),
     streak: isCorrect ? stat.streak + 1 : 0,
     lastAt: at,
   };

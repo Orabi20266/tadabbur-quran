@@ -35,6 +35,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,json}'],
+        // التفسير ١٨ ميغابايت: لا يُحمَّل مع أول فتح للتطبيق. كل سورة تُجلب
+        // عند فتحها ثم يخزّنها عامل الخدمة، فلا يدفع القارئ ثمن ما لم يقرأه.
+        globIgnores: ['tafsir/**', '**/tafsir/**'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         navigateFallback: 'index.html',
         // A new deployment must replace the old cache instead of waiting for
@@ -42,6 +45,21 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        runtimeCaching: [
+          {
+            // ملفات التفسير في `tafsir/ibn-kathir/<رقم>.json`، فالمسار فيه
+            // مجلدان بعد tafsir؛ النمط القديم كان يقبل مقطعاً واحداً فلا يطابق.
+            urlPattern: /\/tafsir\/.+\.json$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'tafsir',
+              expiration: {
+                maxEntries: 240,
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+              },
+            },
+          },
+        ],
       },
     }),
   ],

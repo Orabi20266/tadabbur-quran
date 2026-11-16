@@ -9,6 +9,7 @@ import { Settings } from './pages/Settings';
 import { Onboarding } from './pages/Onboarding';
 import { Tajweed } from './pages/Tajweed';
 import { HadithPage } from './pages/Hadith';
+import { Tafsir } from './pages/Tafsir';
 import { useApp } from './lib/store';
 
 function useTheme() {
@@ -78,6 +79,22 @@ function Shell() {
         element={
           <Layout>
             <HadithPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/tafsir"
+        element={
+          <Layout>
+            <Tafsir />
+          </Layout>
+        }
+      />
+      <Route
+        path="/tafsir/:surah/:ayah"
+        element={
+          <Layout>
+            <Tafsir />
           </Layout>
         }
       />

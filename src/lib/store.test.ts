@@ -24,6 +24,31 @@ describe('mistake resolution', () => {
     expect(getState().mistakes[0].removed).toBe(true);
   });
 
+  it('does not count a word as wrong once it is re-read correctly', () => {
+    recordEvent({ ...base, type: 'wrong', recitedText: 'كل' });
+    expect(getState().wordStats[base.wordKey].wrong).toBe(1);
+
+    recordEvent({ ...base, type: 'correct' });
+    const stat = getState().wordStats[base.wordKey];
+    expect(stat.wrong).toBe(0);
+    expect(stat.correct).toBe(1);
+    // The reader did recite the word, so the attempt is still counted.
+    expect(stat.recited).toBe(2);
+    expect(getState().mistakes[0].removed).toBe(true);
+  });
+
+  it('rolls back only this session\'s resolved attempt', () => {
+    recordEvent({ ...base, sessionId: 'session-a', type: 'wrong' });
+    recordEvent({ ...base, sessionId: 'session-b', type: 'wrong' });
+    recordEvent({ ...base, sessionId: 'session-b', type: 'correct' });
+
+    // The mistake from session A is still active and still counted.
+    expect(getState().wordStats[base.wordKey].wrong).toBe(1);
+    expect(
+      getState().mistakes.filter((m) => !m.removed).map((m) => m.sessionId),
+    ).toEqual(['session-a']);
+  });
+
   it('leaves mistakes from another session or another word active', () => {
     recordEvent({ ...base, type: 'wrong' });
 

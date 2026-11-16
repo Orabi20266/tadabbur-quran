@@ -1,68 +1,52 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowRight,
+  BookOpen,
   Check,
+  CheckCircle2,
   GraduationCap,
   RotateCcw,
-  Star,
-  Trophy,
+  Sparkles,
   X,
 } from 'lucide-react';
-import { tajweedLevels } from '../data/tajweed';
-import type { TajweedLevel, TajweedQuestion } from '../data/tajweed';
+import { tajweedLessons } from '../data/tajweedLessons';
+import type { Lesson, LessonQuestion } from '../lib/types';
 import { arabicNumber } from '../lib/quran';
 
 const STORAGE_KEY = 'tadabbur.tajweed.v1';
-const ROUND_SIZE = 5;
 
-interface PreparedQuestion extends TajweedQuestion {
-  /** Shuffled options with the correct answer re-indexed. */
-  choices: string[];
-  correct: number;
+interface Stored {
+  /** معرّفات الدروس التي أتمّ القارئ قراءتها. */
+  read: number[];
+  /** أفضل نتيجة في أسئلة كل درس. */
+  best: Record<string, number>;
 }
 
-interface Round {
-  level: TajweedLevel;
-  questions: PreparedQuestion[];
+interface Quiz {
+  lesson: Lesson;
   index: number;
   selected: number | null;
   score: number;
   finished: boolean;
 }
 
-interface Stored {
-  best: Record<string, number>;
-}
-
-function shuffle<T>(list: T[]): T[] {
-  const out = [...list];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
-
-function prepare(question: TajweedQuestion): PreparedQuestion {
-  const correctText = question.options[question.answer];
-  const choices = shuffle(question.options);
-  return { ...question, choices, correct: choices.indexOf(correctText) };
-}
-
-function loadBest(): Record<string, number> {
+function loadStored(): Stored {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Stored;
-    return parsed?.best ?? {};
+    if (!raw) return { read: [], best: {} };
+    const parsed = JSON.parse(raw) as Partial<Stored>;
+    return {
+      read: Array.isArray(parsed?.read) ? parsed.read : [],
+      best: parsed?.best ?? {},
+    };
   } catch {
-    return {};
+    return { read: [], best: {} };
   }
 }
 
-function saveBest(best: Record<string, number>) {
+function saveStored(next: Stored) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ best }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
     /* التخزين قد يكون معطّلاً */
   }
@@ -75,62 +59,69 @@ function percentOf(score: number, total: number) {
 const optionLetters = ['أ', 'ب', 'ج', 'د'];
 
 export function Tajweed() {
-  const [best, setBest] = useState<Record<string, number>>(loadBest);
-  const [round, setRound] = useState<Round | null>(null);
+  const [stored, setStored] = useState<Stored>(loadStored);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [quiz, setQuiz] = useState<Quiz | null>(null);
 
-  const levels = useMemo(() => tajweedLevels, []);
+  const lessons = useMemo(() => tajweedLessons, []);
+  const lesson = openId === null ? null : lessons.find((item) => item.id === openId);
+  const readCount = stored.read.filter((id) => lessons.some((item) => item.id === id)).length;
+  const readPercent = percentOf(readCount, lessons.length);
 
-  const startLevel = (level: TajweedLevel) => {
-    const picked = shuffle(level.questions).slice(0, ROUND_SIZE);
-    setRound({
-      level,
-      questions: picked.map(prepare),
-      index: 0,
-      selected: null,
-      score: 0,
-      finished: false,
-    });
+  const markRead = (id: number) => {
+    if (stored.read.includes(id)) return;
+    const next = { ...stored, read: [...stored.read, id] };
+    setStored(next);
+    saveStored(next);
+  };
+
+  const unmarkRead = (id: number) => {
+    const next = { ...stored, read: stored.read.filter((value) => value !== id) };
+    setStored(next);
+    saveStored(next);
+  };
+
+  const startQuiz = (target: Lesson) => {
+    setQuiz({ lesson: target, index: 0, selected: null, score: 0, finished: false });
   };
 
   const answer = (choice: number) => {
-    setRound((prev) => {
+    setQuiz((prev) => {
       if (!prev || prev.selected !== null) return prev;
-      const current = prev.questions[prev.index];
+      const current: LessonQuestion = prev.lesson.questions[prev.index];
       return {
         ...prev,
         selected: choice,
-        score: prev.score + (choice === current.correct ? 1 : 0),
+        score: prev.score + (choice === current.answer ? 1 : 0),
       };
     });
   };
 
-  const next = () => {
-    if (!round) return;
-    if (round.index + 1 < round.questions.length) {
-      setRound({ ...round, index: round.index + 1, selected: null });
+  const nextQuestion = () => {
+    if (!quiz) return;
+    if (quiz.index + 1 < quiz.lesson.questions.length) {
+      setQuiz({ ...quiz, index: quiz.index + 1, selected: null });
       return;
     }
-    const percent = percentOf(round.score, round.questions.length);
-    setRound({ ...round, finished: true });
-    const key = String(round.level.id);
-    if (percent > (best[key] ?? 0)) {
-      const updated = { ...best, [key]: percent };
-      setBest(updated);
-      saveBest(updated);
+    const percent = percentOf(quiz.score, quiz.lesson.questions.length);
+    const key = String(quiz.lesson.id);
+    if (percent > (stored.best[key] ?? 0)) {
+      const next = { ...stored, best: { ...stored.best, [key]: percent } };
+      setStored(next);
+      saveStored(next);
     }
+    setQuiz({ ...quiz, finished: true });
   };
 
-  const closeRound = () => setRound(null);
-
-  if (round && round.finished) {
-    const percent = percentOf(round.score, round.questions.length);
-    const stars = percent >= 90 ? 3 : percent >= 75 ? 2 : percent >= 50 ? 1 : 0;
+  // ── نتيجة الأسئلة ─────────────────────────────────────────────
+  if (quiz && quiz.finished) {
+    const percent = percentOf(quiz.score, quiz.lesson.questions.length);
     return (
       <div className="stack">
         <header className="page-head">
           <div>
-            <p className="eyebrow">{round.level.title}</p>
-            <h1>نتيجة الجولة</h1>
+            <p className="eyebrow">{quiz.lesson.title}</p>
+            <h1>انتهت الأسئلة</h1>
           </div>
           <span className="brand-mark" aria-label="تدبّر">
             تدبّر
@@ -139,24 +130,26 @@ export function Tajweed() {
 
         <section className="card result-card">
           <div className={`result-badge${percent >= 70 ? ' is-pass' : ''}`}>
-            {percent >= 70 ? <Trophy size={30} aria-hidden /> : <Star size={30} aria-hidden />}
+            {percent >= 70 ? (
+              <CheckCircle2 size={30} aria-hidden />
+            ) : (
+              <GraduationCap size={30} aria-hidden />
+            )}
           </div>
           <strong className="result-score">{percent}%</strong>
           <p className="muted">
-            أجبت عن {arabicNumber(round.score)} من {arabicNumber(round.questions.length)}{' '}
-            أسئلة بشكل صحيح.
+            أجبت عن {arabicNumber(quiz.score)} من{' '}
+            {arabicNumber(quiz.lesson.questions.length)} إجابات صحيحة.
           </p>
-          <div className="result-stars" aria-hidden>
-            {[0, 1, 2].map((i) => (
-              <Star key={i} size={22} className={i < stars ? 'on' : ''} />
-            ))}
-          </div>
           <div className="row center-row">
-            <button className="btn btn-ghost" onClick={closeRound}>
-              <ArrowRight size={17} aria-hidden /> كل المراحل
+            <button className="btn btn-ghost" onClick={() => setQuiz(null)}>
+              <ArrowRight size={17} aria-hidden /> رجوع للدرس
             </button>
-            <button className="btn btn-primary" onClick={() => startLevel(round.level)}>
-              <RotateCcw size={17} aria-hidden /> جولة أخرى
+            <button
+              className="btn btn-primary"
+              onClick={() => startQuiz(quiz.lesson)}
+            >
+              <RotateCcw size={17} aria-hidden /> إعادة الأسئلة
             </button>
           </div>
         </section>
@@ -164,30 +157,32 @@ export function Tajweed() {
     );
   }
 
-  if (round) {
-    const current = round.questions[round.index];
-    const selected = round.selected;
-    const answered = selected !== null;
-
+  // ── الأسئلة ───────────────────────────────────────────────────
+  if (quiz) {
+    const current = quiz.lesson.questions[quiz.index];
+    const answered = quiz.selected !== null;
     return (
       <div className="stack">
         <header className="page-head">
-          <button className="icon-btn" onClick={closeRound} aria-label="العودة للمراحل">
+          <button className="icon-btn" onClick={() => setQuiz(null)} aria-label="رجوع للدرس">
             <ArrowRight size={20} />
           </button>
           <div className="quiz-head-copy">
-            <p className="eyebrow">{round.level.icon} {round.level.title}</p>
+            <p className="eyebrow">
+              {quiz.lesson.icon} {quiz.lesson.title}
+            </p>
             <h1>
-              السؤال {arabicNumber(round.index + 1)} من {arabicNumber(round.questions.length)}
+              السؤال {arabicNumber(quiz.index + 1)} من{' '}
+              {arabicNumber(quiz.lesson.questions.length)}
             </h1>
           </div>
-          <span className="quiz-score">{arabicNumber(round.score)} ✓</span>
+          <span className="quiz-score">{arabicNumber(quiz.score)} ✓</span>
         </header>
 
         <div className="quiz-progress" aria-hidden>
           <span
             style={{
-              width: `${((round.index + (answered ? 1 : 0)) / round.questions.length) * 100}%`,
+              width: `${((quiz.index + (answered ? 1 : 0)) / quiz.lesson.questions.length) * 100}%`,
             }}
           />
         </div>
@@ -195,9 +190,9 @@ export function Tajweed() {
         <section className="card quiz-card">
           <h2 className="quiz-question">{current.q}</h2>
           <div className="quiz-options">
-            {current.choices.map((choice, index) => {
-              const isCorrect = index === current.correct;
-              const isPicked = index === selected;
+            {current.options.map((choice, index) => {
+              const isCorrect = index === current.answer;
+              const isPicked = index === quiz.selected;
               const state = !answered
                 ? ''
                 : isCorrect
@@ -223,30 +218,125 @@ export function Tajweed() {
 
           {answered ? (
             <div
-              className={`quiz-feedback${selected === current.correct ? ' is-good' : ' is-bad'}`}
+              className={`quiz-feedback${quiz.selected === current.answer ? ' is-good' : ' is-bad'}`}
               role="status"
             >
               <strong>
-                {selected === current.correct ? 'إجابة صحيحة' : 'الإجابة الصحيحة:'}{' '}
-                {selected === current.correct ? null : current.choices[current.correct]}
+                {quiz.selected === current.answer
+                  ? 'إجابة صحيحة'
+                  : `الإجابة الصحيحة: ${current.options[current.answer]}`}
               </strong>
               <p>{current.explanation}</p>
             </div>
           ) : null}
 
-          <button className="btn btn-primary wide" onClick={next} disabled={!answered}>
-            {round.index + 1 >= round.questions.length ? 'عرض النتيجة' : 'السؤال التالي'}
+          <button className="btn btn-primary wide" onClick={nextQuestion} disabled={!answered}>
+            {quiz.index + 1 >= quiz.lesson.questions.length ? 'عرض النتيجة' : 'السؤال التالي'}
           </button>
         </section>
       </div>
     );
   }
 
+  // ── الدرس ────────────────────────────────────────────────────
+  if (lesson) {
+    const isRead = stored.read.includes(lesson.id);
+    return (
+      <div className="stack">
+        <header className="page-head">
+          <button
+            className="icon-btn"
+            onClick={() => setOpenId(null)}
+            aria-label="رجوع للدروس"
+          >
+            <ArrowRight size={20} />
+          </button>
+          <div className="quiz-head-copy">
+            <p className="eyebrow">{lesson.icon} الدرس</p>
+            <h1>{lesson.title}</h1>
+          </div>
+          <span className="brand-mark" aria-label="تدبّر">
+            تدبّر
+          </span>
+        </header>
+
+        <p className="muted small lesson-lead">{lesson.desc}</p>
+
+        {lesson.sections.map((section, index) => (
+          <section key={section.heading} className="card lesson-section">
+            <h2 className="lesson-heading">
+              <span className="lesson-number" aria-hidden>
+                {arabicNumber(index + 1)}
+              </span>
+              {section.heading}
+            </h2>
+            <p className="lesson-body">{section.body}</p>
+
+            {section.bullets?.length ? (
+              <ul className="lesson-bullets">
+                {section.bullets.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+
+            {section.examples?.length ? (
+              <div className="lesson-examples">
+                {section.examples.map((example) => (
+                  <figure key={example.text} className="lesson-example">
+                    <span className="lesson-rule">{example.rule}</span>
+                    <p className="lesson-example-text" dir="rtl" lang="ar">
+                      {example.text}
+                    </p>
+                    {example.note ? (
+                      <figcaption className="muted small">{example.note}</figcaption>
+                    ) : null}
+                  </figure>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ))}
+
+        <section className="card lesson-actions">
+          <div className="lesson-actions-copy">
+            <strong>
+              {arabicNumber(lesson.questions.length)} أسئلة تأكيد على هذا الدرس
+            </strong>
+            <p className="muted small">
+              الأسئلة للتثبيت لا للامتحان: تُصحَّح إجابتك فوراً مع التعليل.
+            </p>
+          </div>
+          <div className="row center-row">
+            <button className="btn btn-primary" onClick={() => startQuiz(lesson)}>
+              <Sparkles size={17} aria-hidden /> اختبر نفسك
+            </button>
+            {isRead ? (
+              <button className="btn btn-ghost" onClick={() => unmarkRead(lesson.id)}>
+                <CheckCircle2 size={17} aria-hidden /> تمّت القراءة
+              </button>
+            ) : (
+              <button className="btn btn-secondary" onClick={() => markRead(lesson.id)}>
+                <Check size={17} aria-hidden /> علّم كمقروء
+              </button>
+            )}
+          </div>
+          {stored.best[String(lesson.id)] !== undefined ? (
+            <p className="muted small">
+              أفضل نتيجة سابقة: {arabicNumber(stored.best[String(lesson.id)] ?? 0)}%
+            </p>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
+  // ── قائمة الدروس ─────────────────────────────────────────────
   return (
     <div className="stack">
       <header className="page-head">
         <div>
-          <p className="eyebrow">تعلّم · اختبر · أتقن</p>
+          <p className="eyebrow">تعلّم · افهم · أتقن</p>
           <h1>أحكام التجويد</h1>
         </div>
         <span className="brand-mark" aria-label="تدبّر">
@@ -256,35 +346,45 @@ export function Tajweed() {
 
       <section className="card tajweed-intro">
         <span className="tajweed-intro-icon">
-          <GraduationCap size={26} aria-hidden />
+          <BookOpen size={26} aria-hidden />
         </span>
-        <div>
-          <strong>{arabicNumber(tajweedLevels.length)} مراحل · أسئلة اختيار من متعدد</strong>
+        <div className="tajweed-intro-copy">
+          <strong>
+            {arabicNumber(lessons.length)} دروس · شرح منسّق وأمثلة قرآنية
+          </strong>
           <p className="muted small">
-            أسئلة مستوحاة من لعبة أحكام التجويد، مع شرح الإجابة الصحيحة. كل جولة
-            خمسة أسئلة، وتُخلط الخيارات في كل مرة.
+            كل درس يشرح الحكم بلغة مبسّطة، ويعرض أمثلة من المصحف، وينتهي بثلاثة
+            أسئلة تأكيد. اضغط الدرس لقراءته.
+          </p>
+          <div className="lesson-progress" aria-hidden>
+            <span style={{ width: `${readPercent}%` }} />
+          </div>
+          <p className="muted small">
+            أتممت {arabicNumber(readCount)} من {arabicNumber(lessons.length)} دروس
           </p>
         </div>
       </section>
 
       <div className="tajweed-levels">
-        {levels.map((level, index) => {
-          const score = best[String(level.id)];
+        {lessons.map((item, index) => {
+          const isRead = stored.read.includes(item.id);
+          const score = stored.best[String(item.id)];
           return (
             <button
-              key={level.id}
-              className="card tajweed-level"
-              onClick={() => startLevel(level)}
+              key={item.id}
+              className={`card tajweed-level${isRead ? ' is-read' : ''}`}
+              onClick={() => setOpenId(item.id)}
             >
               <span className="tajweed-level-icon" aria-hidden>
-                {level.icon}
+                {isRead ? <CheckCircle2 size={26} /> : item.icon}
               </span>
               <span className="tajweed-level-copy">
-                <small className="muted">المرحلة {arabicNumber(index + 1)}</small>
-                <strong>{level.title}</strong>
-                <span className="muted small">{level.desc}</span>
+                <small className="muted">الدرس {arabicNumber(index + 1)}</small>
+                <strong>{item.title}</strong>
+                <span className="muted small">{item.desc}</span>
                 <span className="tajweed-level-meta">
-                  {arabicNumber(level.questions.length)} سؤالاً
+                  {arabicNumber(item.sections.length)} فقرات ·{' '}
+                  {arabicNumber(item.questions.length)} أسئلة
                   {score !== undefined ? (
                     <span className={`quiz-best${score >= 70 ? ' is-pass' : ''}`}>
                       أفضل نتيجة {arabicNumber(score)}%
@@ -296,6 +396,11 @@ export function Tajweed() {
           );
         })}
       </div>
+
+      <p className="muted small">
+        المنهج مستند إلى قسم التجويد في موقع surahquran.com/Tajweed، والصياغة
+        والأمثلة كُتبت لهذا التطبيق.
+      </p>
     </div>
   );
 }

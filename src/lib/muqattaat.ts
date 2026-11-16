@@ -8,6 +8,9 @@
  * word at each position and turns the spoken letter names back into letters.
  */
 
+import { normalizeArabic } from './quran';
+import { phoneticSimilarity } from './align';
+
 /** surah:ayah → the letters written in the mushaf. */
 const AT: Record<string, string> = {
   '2:1': 'الم',
@@ -50,6 +53,21 @@ export function muqattaahAt(
   if (index !== 0) return null;
   return AT[`${surah}:${ayah}`] ?? null;
 }
+
+/**
+ * The whole opening said as one word. These are not a letter followed by a
+ * letter but the name of the group itself, so they are matched as one token
+ * before any segmentation: «يسين»/«ياسين» for يس, «طها»/«طاها» for طه and
+ * «حميم»/«حاميم» for حم.
+ */
+const WHOLE: Record<string, string> = {
+  ياسين: 'يس',
+  يسين: 'يس',
+  طاها: 'طه',
+  طها: 'طه',
+  حاميم: 'حم',
+  حميم: 'حم',
+};
 
 /**
  * Spoken name of each letter, already normalised (hamza forms collapse and
@@ -99,6 +117,13 @@ const ALIAS: Record<string, string> = {
   ياا: 'ي',
   طاا: 'ط',
   حاا: 'ح',
+  // The engine often prefixes a hamza to a name that opens with ع or ح.
+  اعين: 'ع',
+  احا: 'ح',
+  اصاد: 'ص',
+  // «سين»/«صاد» heard with a short vowel written as a long one.
+  سيين: 'س',
+  صياد: 'ص',
 };
 
 /**
@@ -201,11 +226,68 @@ export function spokenHint(letters: string): string {
 }
 
 /**
+ * Names long enough to survive a fuzzy comparison. Two-letter names («ها»,
+ * «يا», «طا») and bare letters are never fuzzed: one wrong letter there is a
+ * different name, not a mishearing.
+ */
+const FUZZY = Object.keys(NAME_LOOKUP).filter((name) => name.length >= 3);
+
+/**
+ * Segment a token whose names were heard imprecisely, but only down a path
+ * that spells a prefix of `remaining`. Constraining the search by the letters
+ * we are actually waiting for is what keeps a loose match from accepting the
+ * wrong letter or an ordinary word: «كفر» cannot become «الف» because the
+ * first expected letter is ا and no slice of «كفر» is close to «ألف».
+ */
+function fuzzyRun(token: string, remaining: string): string | null {
+  let best: { letters: string; score: number } | null = null;
+
+  const walk = (
+    at: number,
+    rest: string,
+    letters: string,
+    score: number,
+    parts: number,
+  ) => {
+    if (at === token.length) {
+      if (!letters) return;
+      const average = score / parts;
+      if (!best || average > best.score) best = { letters, score: average };
+      return;
+    }
+    for (const name of FUZZY) {
+      const letter = NAME_LOOKUP[name];
+      if (!rest.startsWith(letter)) continue;
+      for (const span of [name.length, name.length + 1, name.length - 1]) {
+        if (span < 2 || at + span > token.length) continue;
+        const slice = token.slice(at, at + span);
+        if (slice === name) continue;
+        const sim = phoneticSimilarity(slice, name);
+        if (sim < 0.8) continue;
+        walk(at + span, rest.slice(letter.length), letters + letter, score + sim, parts + 1);
+      }
+    }
+  };
+
+  walk(0, remaining, '', 0, 0);
+  return best ? (best as { letters: string }).letters : null;
+}
+
+/** Normalise a token the way the tracker does before any lookup. */
+function clean(token: string): string {
+  return normalizeArabic(token).replace(/[^\u0621-\u064A]/g, '');
+}
+
+/**
  * Read a token that is made of spoken letter names. Returns the letters, or
  * null when the token is not made of names at all (an ordinary word).
  */
 export function readLetterNames(token: string): string | null {
-  return parseNames(token, NAMES, NAME_LOOKUP);
+  const cleanToken = clean(token);
+  if (!cleanToken) return null;
+  const whole = WHOLE[cleanToken];
+  if (whole) return whole;
+  return parseNames(cleanToken, NAMES, NAME_LOOKUP);
 }
 
 /**
@@ -214,5 +296,23 @@ export function readLetterNames(token: string): string | null {
  * tracker calls this while the cursor is on a disconnected-letters word.
  */
 export function readLetterSpelling(token: string): string | null {
-  return parseNames(token, SPELLINGS, SPELL_LOOKUP);
+  const cleanToken = clean(token);
+  if (!cleanToken) return null;
+  const whole = WHOLE[cleanToken];
+  if (whole) return whole;
+  return parseNames(cleanToken, SPELLINGS, SPELL_LOOKUP);
+}
+
+/**
+ * Read one token while the cursor is on a disconnected letters word and
+ * `remaining` letters are still expected. An exact name spelling wins; if the
+ * engine wrote the name imprecisely («مين» for «ميم», «ساد» for «صاد») a
+ * fuzzy segmentation is tried, but only one that spells a real prefix of the
+ * opening. Returns the letters this token covers, or null.
+ */
+export function readLetterRun(token: string, remaining: string): string | null {
+  if (!remaining) return null;
+  const exact = readLetterSpelling(token);
+  if (exact) return remaining.startsWith(exact) ? exact : null;
+  return fuzzyRun(clean(token), remaining);
 }

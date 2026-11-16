@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   muqattaahAt,
   readLetterNames,
+  readLetterRun,
   readLetterSpelling,
   spokenHint,
   spokenPhrases,
@@ -75,6 +76,42 @@ describe('disconnected letters', () => {
     expect(readLetterNames('نونا')).toBe('ن');
   });
 
+  it('reads the names as the engine writes them, with diacritics', () => {
+    expect(readLetterNames('أَلِف')).toBe('ا');
+    expect(readLetterNames('لاَم')).toBe('ل');
+    expect(readLetterNames('مِيم')).toBe('م');
+    expect(readLetterNames('هَاء')).toBe('ه');
+    expect(readLetterNames('يَاء')).toBe('ي');
+    expect(readLetterNames('طَاء')).toBe('ط');
+    expect(readLetterNames('حَاء')).toBe('ح');
+    expect(readLetterNames('رَاء')).toBe('ر');
+  });
+
+  it('reads the merged names the engine may shorten', () => {
+    expect(readLetterNames('يسين')).toBe('يس');
+    expect(readLetterNames('ياسين')).toBe('يس');
+    expect(readLetterNames('طها')).toBe('طه');
+    expect(readLetterNames('طاها')).toBe('طه');
+    expect(readLetterNames('حميم')).toBe('حم');
+    expect(readLetterNames('حاميم')).toBe('حم');
+    expect(readLetterSpelling('يسين')).toBe('يس');
+    expect(readLetterSpelling('طها')).toBe('طه');
+  });
+
+  it('reads an imprecise name only as the letters still owed', () => {
+    // «ميم» heard «مين», «صاد» heard «ساد», «عين» heard «اعين».
+    expect(readLetterRun('مين', 'م')).toBe('م');
+    expect(readLetterRun('ساد', 'ص')).toBe('ص');
+    expect(readLetterRun('اعين', 'ع')).toBe('ع');
+    expect(readLetterRun('الف', 'الم')).toBe('ا');
+    // The same mishearing may not become a letter that is not next.
+    expect(readLetterRun('مين', 'ل')).toBeNull();
+    expect(readLetterRun('ساد', 'م')).toBeNull();
+    // An ordinary word is still not a spelling.
+    expect(readLetterRun('كفر', 'الم')).toBeNull();
+    expect(readLetterRun('الحمد', 'الم')).toBeNull();
+  });
+
   it('describes how the opening is said', () => {
     expect(spokenHint('الم')).toBe('ألف لام ميم');
     expect(spokenHint('كهيعص')).toBe('كاف ها يا عين صاد');
@@ -115,6 +152,54 @@ describe('disconnected letters', () => {
   it('accepts the written form and the merged name', () => {
     for (const spoken of ['الم', 'الفلامميم']) {
       const h = harness(wordsForRange(2, 1, 1));
+      h.tracker.feed([spoken]);
+      expect(h.cursor()).toBe(1);
+      expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    }
+  });
+
+  it('accepts names the engine heard imprecisely', () => {
+    for (const spoken of [
+      ['الف', 'لام', 'مين'],
+      ['الفا', 'لاما', 'مين'],
+      ['اليف', 'لام', 'ميم'],
+    ]) {
+      const h = harness(wordsForRange(2, 1, 1));
+      h.tracker.feed(spoken);
+      expect(h.cursor()).toBe(1);
+      expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    }
+  });
+
+  it('ignores a repeated letter name without counting it twice', () => {
+    for (const spoken of [
+      ['الف', 'الف', 'لام', 'ميم'],
+      ['الف', 'لام', 'لام', 'ميم'],
+      ['الف', 'لام', 'ميم', 'ميم'],
+    ]) {
+      const h = harness(wordsForRange(2, 1, 1));
+      h.tracker.feed(spoken);
+      expect(h.cursor()).toBe(1);
+      expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    }
+  });
+
+  it('accepts a restart of the opening from its first letter', () => {
+    const h = harness(wordsForRange(2, 1, 1));
+    h.tracker.feed(['لام', 'الف', 'لام', 'ميم']);
+    expect(h.cursor()).toBe(1);
+    // The out-of-order first name is judged by ordinary alignment, then the
+    // restarted opening completes the word.
+    expect(h.events.map((e) => e.type)).toContain('correct');
+  });
+
+  it('accepts the shortened merged names', () => {
+    for (const [surah, spoken] of [
+      [36, 'يسين'],
+      [20, 'طها'],
+      [40, 'حميم'],
+    ] as [number, string][]) {
+      const h = harness(wordsForRange(surah, 1, 1));
       h.tracker.feed([spoken]);
       expect(h.cursor()).toBe(1);
       expect(h.events.map((e) => e.type)).toEqual(['correct']);

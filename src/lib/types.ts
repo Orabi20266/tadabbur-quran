@@ -93,3 +93,34 @@ export interface WordEvent extends DetectorWord {
   type: EventType;
   at: number;
 }
+
+export interface LessonExample {
+  /** المثال كما يُكتب في المصحف. */
+  text: string;
+  /** الحكم الظاهر في المثال. */
+  rule: string;
+  note?: string;
+}
+
+export interface LessonSection {
+  heading: string;
+  body: string;
+  bullets?: string[];
+  examples?: LessonExample[];
+}
+
+export interface LessonQuestion {
+  q: string;
+  options: string[];
+  answer: number;
+  explanation: string;
+}
+
+export interface Lesson {
+  id: number;
+  title: string;
+  icon: string;
+  desc: string;
+  sections: LessonSection[];
+  questions: LessonQuestion[];
+}

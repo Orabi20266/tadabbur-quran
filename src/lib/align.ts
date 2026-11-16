@@ -182,6 +182,15 @@ export function wordScore(heard: string, expected: string): number {
     if (JOINING_PARTICLE.has(heard[0]) && heard.length >= 5) {
       best = Math.max(best, scoreCore(heard.slice(1), expected));
     }
+    // A dropped definite article: «ٱلۡقَمَرُ» heard «قمر», «ٱلشَّمۡسُ» heard
+    // «شمس». The article is not part of the word being tested, so dropping it
+    // is the same kind of noise as a dropped و.
+    if (expected.startsWith('\u0627\u0644') && expected.length >= 5) {
+      best = Math.max(best, scoreCore(heard, expected.slice(2)));
+    }
+    if (heard.startsWith('\u0627\u0644') && heard.length >= 5) {
+      best = Math.max(best, scoreCore(heard.slice(2), expected));
+    }
     return best;
   }
   return 0;
@@ -189,6 +198,11 @@ export function wordScore(heard: string, expected: string): number {
 
 /** The matching rules that do not move letters between positions. */
 function scoreCore(heard: string, expected: string): number {
+  // The specific rules come first: a generic edit-distance match would also
+  // accept them, but with a lower score that hides why the word was accepted.
+  const meem = meemSakinahScore(heard, expected);
+  if (meem > 0) return meem;
+
   const direct = scorePair(heard, expected);
   if (direct > 0) return direct;
 
@@ -196,6 +210,21 @@ function scoreCore(heard: string, expected: string): number {
   if (assimilated > 0) return assimilated;
 
   return tanweenScore(heard, expected);
+}
+
+/**
+ * A meem sakinah before ب is recited with ikhfa shafawi: the lips close and the
+ * sound becomes a nasal meem, which recognisers regularly write as ن
+ * («عليهم» → «عليهن»، «تَرۡمِيهِم» → «ترميهن»). Only the final letter may
+ * differ and the word must be long enough that «لهم»/«لهن» cannot be confused,
+ * so a genuinely different word stays rejected.
+ */
+function meemSakinahScore(heard: string, expected: string): number {
+  if (heard.length !== expected.length || expected.length < 4) return 0;
+  const want = expected[expected.length - 1];
+  if (want !== '\u0645') return 0;
+  if (heard[heard.length - 1] !== '\u0646') return 0;
+  return heard.slice(0, -1) === expected.slice(0, -1) ? 0.9 : 0;
 }
 
 /**

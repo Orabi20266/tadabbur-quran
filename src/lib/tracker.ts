@@ -5,7 +5,12 @@ import {
   phoneticSimilarity,
   wordScore,
 } from './align';
-import { muqattaahAt, readLetterSpelling, spokenPhrases } from './muqattaat';
+import {
+  muqattaahAt,
+  readLetterRun,
+  readLetterSpelling,
+  spokenPhrases,
+} from './muqattaat';
 import { tashkeelDiffers } from './quran';
 import type { DetectorWord, EventType } from './types';
 
@@ -252,22 +257,42 @@ export class TranscriptTracker {
       return true;
     }
 
-    const letters = readLetterSpelling(token);
-    if (!letters) {
-      // An ordinary word: the reader is not spelling the letters out.
-      this.letterRun = null;
-      return false;
-    }
-
     const run =
       this.letterRun?.key === word.key
         ? this.letterRun
         : { key: word.key, heard: '', letters: '' };
-    const next = run.letters + letters;
-    if (!mq.startsWith(next)) {
+
+    // A repeated name — a stutter or the engine hearing the same letter twice —
+    // is ignored while the run is intact: the reader has not said anything
+    // wrong, so the letter is not counted twice and no mistake is recorded.
+    const spelling = readLetterSpelling(token);
+    if (spelling && run.letters.endsWith(spelling)) {
+      return true;
+    }
+
+    // Only the letters still owed are offered to the matcher, so a fuzzy name
+    // can never be read as a letter that is not next in the opening.
+    const letters = readLetterRun(token, mq.slice(run.letters.length));
+    if (!letters) {
+      // The reader may have gone back and restarted the opening from its first
+      // letter («ألف» again): begin a fresh run instead of blaming the token.
+      if (spelling && mq.startsWith(spelling)) {
+        this.pendingRewind = null;
+        if (spelling === mq) {
+          this.letterRun = null;
+          this.completeLetters(heard);
+        } else {
+          this.letterRun = { key: word.key, heard, letters: spelling };
+        }
+        return true;
+      }
+      // An ordinary word or a name out of order: the reader is not spelling
+      // the opening correctly, so ordinary alignment judges the token.
       this.letterRun = null;
       return false;
     }
+
+    const next = run.letters + letters;
 
     this.pendingRewind = null;
     const spoken = run.heard ? `${run.heard} ${heard}` : heard;

@@ -76,6 +76,28 @@ describe('word matching', () => {
     expect(wordScore('كفر', 'وكاسا')).toBe(0);
   });
 
+  it('accepts a nasal meem of ikhfa shafawi', () => {
+    // «عَلَيۡهِم بِحِجَارَةٍ»: the meem is hidden before ب and the engine may
+    // hear it as a nasal «ن» or even a «ب».
+    expect(wordScore('عليهن', 'عليهم')).toBeGreaterThan(0.8);
+    expect(wordScore('ترميهن', 'ترميهم')).toBeGreaterThan(0.8);
+    expect(wordScore('المنين', 'المنيم')).toBeGreaterThan(0.8);
+    // Too short to be safe: «لهم» and «لهن» are two different words.
+    expect(wordScore('لهن', 'لهم')).toBe(0);
+    expect(wordScore('بهن', 'بهم')).toBe(0);
+    // A different word is still rejected.
+    expect(wordScore('عليمن', 'عليهم')).toBe(0);
+    expect(wordScore('عليهم', 'عليهم')).toBe(1);
+  });
+
+  it('accepts a dropped definite article', () => {
+    expect(wordScore('قمر', 'القمر')).toBeGreaterThan(0.8);
+    expect(wordScore('شمس', 'الشمس')).toBeGreaterThan(0.8);
+    expect(wordScore('رحمن', 'الرحمن')).toBeGreaterThan(0.8);
+    // Dropping the article may not turn one word into another one.
+    expect(wordScore('كفر', 'القمر')).toBe(0);
+  });
+
   it('accepts an assimilated final noon (idgham and iqlab)', () => {
     // «مِن رَّبِّكَ» sounds like «مر ربك», «مِن بَعۡدِ» like «مم بعد».
     expect(wordScore('مر', 'من')).toBeGreaterThan(0.8);

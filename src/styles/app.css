@@ -969,36 +969,6 @@ h1 {
   overflow: hidden;
 }
 
-.rule-notes {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 6px 20px 0;
-  font-size: 12px;
-}
-
-.rule-chip {
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border-input);
-  background: var(--surface);
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.rule-chip.is-low {
-  border-color: var(--ok, #2e7d32);
-}
-
-.rule-chip.is-medium {
-  border-color: var(--warn, #b26a00);
-}
-
-.rule-chip.is-high {
-  border-color: var(--danger, #c62828);
-}
-
 .letters-hint {
   display: flex;
   align-items: center;
@@ -1477,8 +1447,7 @@ label,
 select,
 input[type='number'],
 input[type='search'],
-input[type='text'],
-input[type='password'] {
+input[type='text'] {
   width: 100%;
   min-height: 44px;
   padding: 0 12px;

@@ -53,9 +53,6 @@ import type { TrackerMeta } from '../lib/tracker';
 import { playMistakeSound, primeMistakeSound } from '../lib/sound';
 import { muqattaahAt, spokenHint } from '../lib/muqattaat';
 import { useSpeech } from '../lib/useSpeech';
-import { useGeminiSpeech } from '../lib/geminiSpeech';
-import { hasSharedSpeech } from '../lib/config';
-import type { RuleNote } from '../lib/geminiSpeech';
 import { Sheet } from '../components/Sheet';
 import { WordSpan } from '../components/WordSpan';
 import { WordHistoryPanel } from '../components/WordHistoryPanel';
@@ -138,34 +135,18 @@ export function Reader() {
       else tracker.feed([token]);
     }
   }, []);
-  const [ruleNotes, setRuleNotes] = useState<RuleNote[]>([]);
-  const browserSpeech = useSpeech(handleTokens, 'ar-SA', {
+  const {
+    status: speechStatus,
+    heard,
+    supported: speechSupported,
+    biasing: speechBiasing,
+    start: startSpeech,
+    stop: stopSpeech,
+  } = useSpeech(handleTokens, 'ar-SA', {
     // The reader's position decides which words steer the engine; nothing here
     // can reveal or advance a word on its own.
     phrases: () => trackerRef.current?.biasPhrases(8) ?? [],
   });
-  /**
-   * Gemini hears the recitation itself instead of asking the browser engine to
-   * guess Arabic, so harakat and tajweed can be judged. It runs only when the
-   * reader picked it; both hooks stay mounted because hooks cannot be
-   * conditional.
-   */
-  const onRuleNotes = useCallback((notes: RuleNote[]) => {
-    setRuleNotes((prev) => [...notes, ...prev].slice(0, 6));
-  }, []);
-  const geminiSpeech = useGeminiSpeech(handleTokens, {
-    apiKey: settings.geminiKey,
-    endpoint: settings.geminiEndpoint,
-    model: settings.geminiModel,
-    onRuleNotes,
-  });
-  const activeSpeech = engine === 'gemini' ? geminiSpeech : browserSpeech;
-  const speechStatus = activeSpeech.status;
-  const heard = activeSpeech.heard;
-  const speechSupported = activeSpeech.supported;
-  const speechBiasing = activeSpeech.biasing;
-  const startSpeech = activeSpeech.start;
-  const stopSpeech = activeSpeech.stop;
 
   const engineRef = useRef<SpeechEngine>(settings.speechEngine);
   const sessionIdRef = useRef<string | null>(null);
@@ -230,16 +211,6 @@ export function Reader() {
       }
       if (requested) {
         updateSettings({ speechEngine: requested, speechConsent: true });
-      }
-      if (
-        chosen === 'gemini' &&
-        !settings.geminiKey.trim() &&
-        !settings.geminiEndpoint.trim() &&
-        !hasSharedSpeech
-      ) {
-        showToast('أضف مفتاح Gemini في الإعدادات أولاً');
-        setStartOpen(true);
-        return;
       }
       // Unlock audio while we are still inside the user's gesture.
       primeMistakeSound();
@@ -470,7 +441,7 @@ export function Reader() {
       (window as unknown as { __tadabbur?: TranscriptTracker }).__tadabbur =
         tracker;
     }
-    if (engineRef.current !== 'manual' && !pausedRef.current) startSpeech();
+    if (engineRef.current === 'browser' && !pausedRef.current) startSpeech();
     return () => {
       trackerRef.current = null;
       if (import.meta.env.DEV) {
@@ -537,7 +508,7 @@ export function Reader() {
     if (paused) {
       pausedRef.current = false;
       setPaused(false);
-      if (engineRef.current !== 'manual') startSpeech();
+      if (engineRef.current === 'browser') startSpeech();
     } else {
       pausedRef.current = true;
       setPaused(true);
@@ -743,11 +714,7 @@ export function Reader() {
           />
           <span>{statusLabel}</span>
           <span className="engine-badge">
-            {manualMode
-              ? 'يدوي'
-              : engine === 'gemini'
-                ? 'Gemini'
-                : 'تعرّف المتصفح'}
+            {manualMode ? 'يدوي' : 'تعرّف المتصفح'}
           </span>
           <span className="spacer" />
           {settings.detectTashkeel ? (
@@ -797,22 +764,6 @@ export function Reader() {
         <div className="heard-line" dir="rtl">
           <span className="muted small">سمعنا:</span>
           <span>{heard}</span>
-        </div>
-      ) : null}
-
-      {phase === 'live' && !manualMode && ruleNotes.length ? (
-        <div className="rule-notes" dir="rtl">
-          <span className="muted small">أحكام:</span>
-          {ruleNotes.map((note, index) => (
-            <span
-              key={`${note.rule}-${note.word ?? ''}-${index}`}
-              className={`rule-chip is-${note.severity ?? 'medium'}`}
-              title={note.detail ?? ''}
-            >
-              {note.rule}
-              {note.word ? ` — ${note.word}` : ''}
-            </span>
-          ))}
         </div>
       ) : null}
 

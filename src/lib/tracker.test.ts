@@ -105,19 +105,63 @@ describe('TranscriptTracker', () => {
     expect(h.cursor()).toBe(1);
   });
 
-  it('flags a wrong word when the next correct word skips over it', () => {
+  it('joins a word the recogniser split in two', () => {
+    const h = makeTracker({ words: wordsForRange(1, 1, 1) });
+    // «الرَّحۡمَٰن» is sometimes emitted as two tokens: «الرح» + «من».
+    h.tracker.feed(['بسم', 'الله', 'الرح', 'من', 'الرحيم']);
+    expect(h.cursor()).toBe(4);
+    expect(h.events.map((e) => e.type)).toEqual([
+      'correct',
+      'correct',
+      'correct',
+      'correct',
+    ]);
+  });
+
+  it('ignores breaths and hesitations without swallowing a real word', () => {
+    const h = makeTracker({ words: wordsForRange(2, 5, 5) });
+    h.tracker.feed([
+      'اولايك',
+      'اه',
+      'عليا',
+      'هم',
+      'هدي',
+      'من',
+      'ربهم',
+      'واولايك',
+      'هم',
+      'المفلحون',
+    ]);
+    // Both «اه» and the first «هم» are filler between words; the second «هم»
+    // is the actual word of the ayah and must still be counted.
+    expect(h.cursor()).toBe(8);
+    expect(h.events).toHaveLength(8);
+    expect(h.events.every((e) => e.type === 'correct')).toBe(true);
+  });
+
+  it('forgives one odd token before the next correct word', () => {
+    // A single unknown token followed by the next word is the recogniser
+    // dropping or mangling one token, not proof that the reader erred.
     const h = makeTracker();
     h.tracker.feed(['سيارة', spoken[1]]);
     expect(h.events.map((e) => [e.key, e.type])).toEqual([
-      [allWords[0].key, 'wrong'],
+      [allWords[0].key, 'correct'],
       [allWords[1].key, 'correct'],
     ]);
     expect(h.cursor()).toBe(2);
   });
 
+  it('flags two consecutive wrong words', () => {
+    const h = makeTracker();
+    h.tracker.feed(['سيارة', 'طائرة']);
+    expect(h.events.map((e) => e.type)).toEqual(['wrong']);
+    expect(h.cursor()).toBe(0);
+  });
+
   it('does not re-count a flagged word when the reader moves past it', () => {
     const h = makeTracker();
-    h.tracker.feed(['سيارة']);
+    // Two unknown tokens confirm the first word is wrong and flag it.
+    h.tracker.feed(['سيارة', 'طائرة']);
     h.tracker.feed([spoken[1]]);
     expect(h.events.map((e) => e.type)).toEqual(['wrong', 'correct']);
     expect(h.events.filter((e) => e.type === 'wrong')).toHaveLength(1);
@@ -270,7 +314,9 @@ describe('TranscriptTracker', () => {
     h.tracker.retry();
     expect(h.blocked()).toBe(false);
     expect(h.cursor()).toBe(1);
-    expect(h.events.map((e) => e.type)).toEqual(['wrong', 'correct']);
+    // The single odd token was never recorded as a mistake, so retrying only
+    // marks the word correct.
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
   });
 
   it('accepts a merged two-word token', () => {
@@ -387,15 +433,18 @@ describe('TranscriptTracker', () => {
     expect(h.events.every((e) => e.type === 'correct')).toBe(true);
   });
 
-  it('still flags a word the reader really skipped', () => {
+  it('still flags a phrase the reader really skipped', () => {
     const h = makeTracker({ words: wordsForRange(1, 1, 7) });
+    // «مَالِكِ يَوْمِ الدِّينِ» is omitted entirely: a jump of two words is real
+    // evidence of a skipped passage, unlike a single dropped token.
     h.tracker.feed([
       'بسم', 'الله', 'الرحمن', 'الرحيم',
       'الحمد', 'لله', 'رب', 'العالمين',
       'الرحمن', 'الرحيم',
-      'مالك', 'الدين',
+      'الدين',
     ]);
     expect(h.events.filter((e) => e.type === 'wrong').map((e) => e.key)).toEqual([
+      '1:4:0',
       '1:4:1',
     ]);
     expect(h.cursor()).toBe(13);
@@ -462,13 +511,15 @@ describe('opening before the first word', () => {
     expect(h.events.map((e) => e.type)).toEqual(['correct']);
   });
 
-  it('only applies to the start of a session', () => {
+  it('swallows a repeated basmalah mid-session without a mistake', () => {
     const h = makeTracker({ words: wordsForRange(2, 1, 2) });
     h.tracker.feed(['الف', 'لام', 'ميم']);
     expect(h.cursor()).toBe(1);
-    // Re-saying the basmalah mid-session is not a free pass for real words.
-    h.tracker.feed(['بسم', 'بسم']);
-    expect(h.events.filter((e) => e.type === 'wrong')).toHaveLength(1);
+    // After a pause the reader may say the basmalah again; it is not part of
+    // the page and must not be counted as a mistake.
+    h.tracker.feed(['بسم', 'الله', 'الرحمن', 'الرحيم']);
+    expect(h.events.filter((e) => e.type === 'wrong')).toHaveLength(0);
+    expect(h.cursor()).toBe(1);
   });
 });
 

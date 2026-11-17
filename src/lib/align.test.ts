@@ -125,6 +125,17 @@ describe('word matching', () => {
     expect(wordScore('الظالين', 'الضالين')).toBeGreaterThan(0.9);
   });
 
+  it('tolerates the remaining common letter confusions', () => {
+    // ش/س, د/ذ, ح/ه and ع/ا are regularly interchangeable in ASR output.
+    expect(wordScore('السر', 'الشر')).toBeGreaterThan(0.8);
+    expect(wordScore('الذار', 'الدار')).toBeGreaterThan(0.8);
+    expect(wordScore('الهمد', 'الحمد')).toBeGreaterThan(0.8);
+    expect(wordScore('الالمين', 'العالمين')).toBeGreaterThan(0.8);
+    // A genuinely different word is still rejected.
+    expect(wordScore('الكتاب', 'الذين')).toBe(0);
+    expect(wordScore('الرحيم', 'الرحمن')).toBe(0);
+  });
+
   it('accepts a close long word but not a different one', () => {
     expect(wordScore('الرحمان', 'الرحمن')).toBeGreaterThan(0.8);
     expect(wordScore('الرحيم', 'الرحمن')).toBe(0);

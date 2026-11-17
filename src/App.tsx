@@ -10,6 +10,7 @@ import { Onboarding } from './pages/Onboarding';
 import { Tajweed } from './pages/Tajweed';
 import { HadithPage } from './pages/Hadith';
 import { Tafsir } from './pages/Tafsir';
+import { Ask } from './pages/Ask';
 import { useApp } from './lib/store';
 
 function useTheme() {
@@ -79,6 +80,14 @@ function Shell() {
         element={
           <Layout>
             <HadithPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/ask"
+        element={
+          <Layout>
+            <Ask />
           </Layout>
         }
       />

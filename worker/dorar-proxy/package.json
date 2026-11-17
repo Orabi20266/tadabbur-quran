@@ -1,0 +1,14 @@
+{
+  "name": "tadabbur-dorar-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "وسيط قراءة بين تطبيق تدبّر وموسوعة الدرر السنية",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "^2.0.1"
+  }
+}

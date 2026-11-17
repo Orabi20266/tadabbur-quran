@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowLeft, BookmarkCheck, Flame, Play, Sparkles, Target, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, BookmarkCheck, Flame, MessageCircle, Play, Sparkles, Target, TriangleAlert } from 'lucide-react';
 import { useApp, todayKey, highlightLevel, memorizedCount } from '../lib/store';
 import { getSurah, arabicNumber, wordsOf } from '../lib/quran';
 
@@ -115,6 +115,20 @@ export function Dashboard() {
           <p className="eyebrow">أكمل من حيث توقفت</p>
           <strong>{continueSurah.name}</strong>
           <small className="muted">الآية {arabicNumber(lastRead.ayah)}</small>
+        </div>
+        <ArrowLeft size={20} aria-hidden />
+      </Link>
+
+      <Link className="card ask-entry" to="/ask">
+        <div className="ask-entry-icon">
+          <MessageCircle size={22} aria-hidden />
+        </div>
+        <div className="ask-entry-copy">
+          <p className="eyebrow">من موسوعة الدرر السنية</p>
+          <strong>اسأل عن حديث أو حكم</strong>
+          <small className="muted">
+            جواب منقول بنصّه مع الراوي والمصدر ودرجة الحديث.
+          </small>
         </div>
         <ArrowLeft size={20} aria-hidden />
       </Link>

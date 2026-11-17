@@ -92,12 +92,20 @@ const PHONETIC_GROUP: Record<string, string> = {
   '\u0635': 's', // ص
   '\u0633': 's', // س
   '\u062b': 's', // ث
+  '\u0634': 's', // ش
   '\u0636': 'd', // ض
   '\u0638': 'd', // ظ
   '\u0630': 'd', // ذ
   '\u0632': 'd', // ز
+  '\u062f': 'd', // د
   '\u0637': 't', // ط
   '\u062a': 't', // ت
+  '\u062d': 'h', // ح
+  '\u0647': 'h', // ه
+  '\u062e': 'h', // خ
+  // The recogniser drops the hamza and sometimes writes ع as a plain alef.
+  '\u0639': 'a', // ع
+  '\u0627': 'a', // ا
 };
 
 const LONG_VOWEL = new Set(['\u0627', '\u0648', '\u064a']);
@@ -382,7 +390,9 @@ export function alignToken(
   cursor: number,
   opts: AlignOptions = {},
 ): Alignment {
-  const lookAhead = opts.lookAhead ?? 4;
+  // A dropped phrase should not turn into a string of false mistakes: look far
+  // enough ahead for the word the reader has actually reached.
+  const lookAhead = opts.lookAhead ?? 6;
   const lookBack = opts.lookBack ?? 2;
   const maxRewind = opts.maxRewind ?? 30;
   const none: Alignment = { kind: 'none', offset: 0, span: 0, score: 0 };

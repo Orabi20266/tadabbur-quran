@@ -1,0 +1,10 @@
+name = "tadabbur-dorar"
+main = "src/index.js"
+compatibility_date = "2026-11-17"
+
+# متصفح Cloudflare: يُستخدم لجلب نتيجة البحث من موقع محمي بـ Cloudflare.
+# الخطة المجانية تشمل ١٠ دقائق متصفح يومياً، والنتائج تُخزَّن يوماً كاملاً.
+[browser]
+binding = "BROWSER"
+
+workers_dev = true

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   BookMarked,
   Bookmark,
   Check,
   Copy,
   ExternalLink,
+  MessageCircle,
   Search,
   X,
 } from 'lucide-react';
@@ -138,15 +140,21 @@ export function HadithPage() {
             نصوص مختارة من موسوعة الدرر السنية، مع الراوي والمصدر ودرجة الحديث
             كما ذكرها المصدر. اضغط «الدرر السنية» لفتح البحث الأصلي.
           </p>
-          <a
-            className="hadith-source-link"
-            href="https://dorar.net/hadith"
-            target="_blank"
-            rel="noreferrer"
-          >
-            dorar.net/hadith
-            <ExternalLink size={13} aria-hidden />
-          </a>
+          <div className="hadith-intro-actions">
+            <a
+              className="hadith-source-link"
+              href="https://dorar.net/hadith"
+              target="_blank"
+              rel="noreferrer"
+            >
+              dorar.net/hadith
+              <ExternalLink size={13} aria-hidden />
+            </a>
+            <Link className="btn btn-primary btn-sm" to="/ask">
+              <MessageCircle size={14} aria-hidden />
+              اسأل الدرر
+            </Link>
+          </div>
         </div>
       </section>
 

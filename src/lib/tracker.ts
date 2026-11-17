@@ -45,6 +45,27 @@ const PREAMBLES: string[][] = [
   ],
 ];
 
+/**
+ * Sounds a recogniser reports when it hears a breath or a hesitation. They are
+ * not Quranic words, but ignoring them must never swallow a word that is
+ * actually being tracked (checked against the expected word before ignoring).
+ */
+const FILLERS = new Set([
+  'اه',
+  'ااه',
+  'اااه',
+  'امم',
+  'هم',
+  'همم',
+  'مم',
+  'ايه',
+  'اها',
+  'يعني',
+  'طيب',
+  'اوكيه',
+  'اوكي',
+]);
+
 /** Compare preamble words without long vowels, so «باسم»/«الرحمان» still count. */
 function looseSame(heard: string, expected: string): boolean {
   const skeleton = (word: string) => word.replace(/[اوىيء]/g, '');
@@ -104,6 +125,13 @@ export class TranscriptTracker {
    * off the expected word.
    */
   private pendingUnknown: { token: string; count: number } | null = null;
+  /**
+   * A token that is only the first half of the expected word, waiting for the
+   * recogniser to deliver the rest («الرح» then «من» for «الرحمن»). Holding it
+   * prevents the tail from being read as the next word and the whole word from
+   * being counted as skipped.
+   */
+  private pendingPartial: { token: string; heard: string } | null = null;
   /**
    * Spoken names of a disconnected-letters word, collected across tokens:
    * «ألف» + «لام» + «ميم» is one mushaf word. Reset as soon as the reader moves
@@ -176,6 +204,7 @@ export class TranscriptTracker {
   retry(): void {
     if (this.done || !this.blocked) return;
     this.pendingUnknown = null;
+    this.pendingPartial = null;
     this.setBlocked(false);
     this.advanceCorrect(1);
   }
@@ -192,6 +221,7 @@ export class TranscriptTracker {
     this.flagged = -1;
     this.pendingRewind = null;
     this.pendingUnknown = null;
+    this.pendingPartial = null;
     this.letterRun = null;
     this.preamble = [];
     this.setBlocked(false);
@@ -288,7 +318,19 @@ export class TranscriptTracker {
       }
       // An ordinary word or a name out of order: the reader is not spelling
       // the opening correctly, so ordinary alignment judges the token.
+      // A half-spoken opening followed by the *next* word is a real omission,
+      // not a recogniser merge (the reader audibly stopped mid-word), so record
+      // it before alignment continues.
+      const partialRun =
+        this.letterRun?.key === word.key ? this.letterRun : null;
+      const abandoned = Boolean(partialRun?.letters);
       this.letterRun = null;
+      if (abandoned) {
+        const next = matchAt(token, this.cfg.normalized.slice(this.cursor + 1));
+        if (next && next.score >= 0.85) {
+          this.handleWrong(partialRun?.heard ?? heard);
+        }
+      }
       return false;
     }
 
@@ -310,6 +352,7 @@ export class TranscriptTracker {
     const word = this.cfg.words[this.cursor];
     if (!word) return;
     this.pendingUnknown = null;
+    this.pendingPartial = null;
     this.emit(word, 'correct', { recitedText: spoken, confidence: 1 });
     this.cursor += 1;
     this.flagged = -1;
@@ -326,12 +369,8 @@ export class TranscriptTracker {
    * «الله» or «من».
    */
   private handlePreamble(token: string): boolean {
-    if (this.cursor !== 0) {
-      this.preamble = [];
-      return false;
-    }
-    const expected = this.cfg.normalized[0] ?? '';
-    // Only a *fresh* opening may be refused: the second word of the basmalah is
+    const expected = this.cfg.normalized[this.cursor] ?? '';
+    // Never swallow the word being tracked. The second word of the basmalah is
     // «الله», which is also the first word of ayahs such as 2:255, and it must
     // still count as part of the opening there.
     if (this.preamble.length === 0 && expected && wordScore(token, expected) > 0) {
@@ -371,6 +410,14 @@ export class TranscriptTracker {
       this.finish();
       return;
     }
+    // A breath or hesitation is not a recitation mistake. A tracked word that
+    // happens to look like one of these is never ignored.
+    if (
+      FILLERS.has(token) &&
+      wordScore(token, this.cfg.normalized[this.cursor] ?? '') === 0
+    ) {
+      return;
+    }
 
     // The isti'adha and basmalah are said before the first word of a session
     // but are not part of the page; swallow them instead of blaming the reader.
@@ -394,6 +441,29 @@ export class TranscriptTracker {
       }
     }
 
+    // A held first half plus this token may be one word the engine split.
+    if (this.pendingPartial) {
+      const partial = this.pendingPartial;
+      this.pendingPartial = null;
+      const expected = this.cfg.normalized[this.cursor] ?? '';
+      if (wordScore(partial.token + token, expected) >= 0.9) {
+        this.pendingUnknown = null;
+        this.emit(this.cfg.words[this.cursor], 'correct', {
+          recitedText: `${partial.heard} ${heard}`,
+          confidence: 1,
+        });
+        this.cursor += 1;
+        this.flagged = -1;
+        if (this.blocked) this.setBlocked(false);
+        this.cfg.onCursor(this.cursor);
+        if (this.cursor >= this.cfg.normalized.length) this.finish();
+        return;
+      }
+      // Not the same word after all: the fragment was only half a word and is
+      // dropped silently. Counting it as a miss here would blame the reader
+      // twice for one recogniser artefact; the new token is judged on its own.
+    }
+
     const alignment = alignToken(token, this.cfg.normalized, this.cursor);
     if (alignment.kind === 'none') {
       // A stray token inside a possible restart should not become a false
@@ -406,11 +476,13 @@ export class TranscriptTracker {
         this.handleWrong(heard);
         return;
       }
+      if (this.holdPartial(heard, token)) return;
       this.noteUnknown(heard);
       return;
     }
     if (alignment.kind === 'repeat' || alignment.kind === 'rewind') {
       this.pendingUnknown = null;
+      this.pendingPartial = null;
       this.pendingRewind = {
         target: this.cursor + alignment.offset,
         span: alignment.span,
@@ -425,6 +497,7 @@ export class TranscriptTracker {
     // unfinished restart candidate and any stray token are no longer relevant.
     this.pendingRewind = null;
     this.pendingUnknown = null;
+    this.pendingPartial = null;
 
     // While held on a word, only that word (or words merged with it) releases
     // the hold. Do not let a later word jump over the one being corrected.
@@ -446,6 +519,11 @@ export class TranscriptTracker {
     }
 
     if (alignment.offset > 0) {
+      // One missing word between two correct ones is almost always the
+      // recogniser dropping or merging a token, not the reader omitting a word.
+      // Do not accuse them for it: reveal the word and continue. A wider jump
+      // is real evidence of a skipped passage and is still recorded.
+      const merged = alignment.offset === 1;
       for (let i = 0; i < alignment.offset; i++) {
         const at = this.cursor + i;
         const skipped = this.cfg.words[at];
@@ -453,7 +531,7 @@ export class TranscriptTracker {
         // The word already flagged stays red, but it must not be counted twice
         // when the reader simply continues past it.
         if (this.flagged === at) continue;
-        this.emit(skipped, this.cfg.detectMistakes ? 'wrong' : 'correct');
+        this.emit(skipped, this.cfg.detectMistakes && !merged ? 'wrong' : 'correct');
       }
     }
 
@@ -527,6 +605,7 @@ export class TranscriptTracker {
     this.cursor = start;
     this.flagged = -1;
     this.pendingUnknown = null;
+    this.pendingPartial = null;
     this.letterRun = null;
     this.setBlocked(false);
 
@@ -549,6 +628,26 @@ export class TranscriptTracker {
   }
 
   /**
+   * Hold a token that looks like the first half of the word being tracked.
+   * The engine sometimes emits «الرح» and then «من» for «الرحمن»; judging the
+   * fragment on its own would skip the word and lose the reader's place. It is
+   * held until the next token arrives, which either completes it or shows it
+   * was noise.
+   */
+  private holdPartial(heard: string, token: string): boolean {
+    const expected = this.cfg.normalized[this.cursor] ?? '';
+    if (!expected || token.length < 2 || token.length >= expected.length) {
+      return false;
+    }
+    const prefix = expected.slice(0, token.length);
+    if (wordScore(token, prefix) < 0.9) return false;
+    this.pendingPartial = { token, heard };
+    // Held mode stops at the word but records nothing yet.
+    if (this.cfg.dontProgressUntilFixed) this.setBlocked(true);
+    return true;
+  }
+
+  /**
    * A token matched nothing. Never accuse the reader on the first one: browser
    * recognisers insert filler words and drop half words constantly. The second
    * consecutive miss is evidence enough, and a real wrong word is still caught
@@ -557,7 +656,13 @@ export class TranscriptTracker {
   private noteUnknown(token: string): void {
     const count = (this.pendingUnknown?.count ?? 0) + 1;
     this.pendingUnknown = { token, count };
-    if (!this.cfg.dontProgressUntilFixed && count < 2) return;
+    // Hold the first odd token without accusing: it may be half a word, a
+    // breath, or a recogniser artefact. Hold mode still stops at the word, but
+    // it records nothing until a second consecutive miss confirms it.
+    if (count < 2) {
+      if (this.cfg.dontProgressUntilFixed) this.setBlocked(true);
+      return;
+    }
     this.pendingUnknown = null;
     this.handleWrong(token);
   }
@@ -573,6 +678,7 @@ export class TranscriptTracker {
   private advanceCorrect(count: number): void {
     this.pendingRewind = null;
     this.pendingUnknown = null;
+    this.pendingPartial = null;
     this.letterRun = null;
     this.preamble = [];
     for (let i = 0; i < count; i++) {

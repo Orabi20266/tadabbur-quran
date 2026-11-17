@@ -7,6 +7,7 @@ import {
   GraduationCap,
   History,
   House,
+  MessagesSquare,
   Settings,
 } from 'lucide-react';
 
@@ -15,14 +16,22 @@ const tabs = [
   { to: '/memorize', label: 'الحفظ', icon: BookOpenText },
   { to: '/tajweed', label: 'التجويد', icon: GraduationCap },
   { to: '/hadith', label: 'الحديث', icon: BookMarked },
+  { to: '/ask', label: 'المحادثة', icon: MessagesSquare },
   { to: '/tafsir', label: 'التفسير', icon: BookOpen },
   { to: '/activity', label: 'السجل', icon: History },
   { to: '/settings', label: 'الإعدادات', icon: Settings },
 ];
 
-export function Layout({ children }: { children: ReactNode }) {
+export function Layout({
+  children,
+  chat = false,
+}: {
+  children: ReactNode;
+  /** الصفحة تدير ارتفاعها بنفسها (محادثة تملأ الشاشة). */
+  chat?: boolean;
+}) {
   return (
-    <div className="app-shell">
+    <div className={`app-shell${chat ? ' is-chat' : ''}`}>
       <main className="page">{children}</main>
       <nav className="tabbar" aria-label="التنقل الرئيسي">
         {tabs.map(({ to, label, icon: Icon, end }) => (

@@ -86,7 +86,7 @@ function Shell() {
       <Route
         path="/ask"
         element={
-          <Layout>
+          <Layout chat>
             <Ask />
           </Layout>
         }

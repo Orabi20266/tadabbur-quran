@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BookMarked,
+  CheckCheck,
   ExternalLink,
   Loader2,
-  MessageCircle,
   RefreshCw,
   Send,
   Trash2,
@@ -16,6 +16,16 @@ import {
   DorarError,
 } from '../lib/dorar';
 import type { DorarAnswer, DorarHadith } from '../lib/dorar';
+import {
+  countLine,
+  DISCLAIMER,
+  missingFor,
+  NOT_FOUND,
+  openingFor,
+  seedFor,
+  weakFor,
+  WELCOME,
+} from '../lib/chatLines';
 
 const STORAGE_KEY = 'tadabbur.ask.v1';
 const MAX_STORED = 8;
@@ -26,6 +36,8 @@ type TurnStatus = 'pending' | 'ready' | 'error';
 interface Turn {
   id: string;
   question: string;
+  /** وقت السؤال، لعرضه في فقاعة المحادثة. */
+  at: number;
   status: TurnStatus;
   answer?: DorarAnswer;
   error?: string;
@@ -64,9 +76,17 @@ function errorMessage(code: string | undefined): string {
   );
 }
 
+/** وقت الفقاعة بصيغة ٢٤ ساعة وبأرقام عربية. */
+function clock(at: number): string {
+  const date = new Date(at);
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return arabicNumber(`${hours}:${minutes}`);
+}
+
 function gradeTone(grade: string): string {
-  if (/صحيح/.test(grade) && !/ضعيف|لا يصح/.test(grade)) return 'is-sahih';
-  if (/حسن/.test(grade) && !/ضعيف|لا يصح/.test(grade)) return 'is-hasan';
+  if (/صحيح/.test(grade) && !/ضعيف|ضعف|لا يصح/.test(grade)) return 'is-sahih';
+  if (/حسن/.test(grade) && !/ضعيف|ضعف|لا يصح/.test(grade)) return 'is-hasan';
   return '';
 }
 
@@ -84,6 +104,10 @@ function loadTurns(): Turn[] {
           typeof turn.question === 'string' &&
           (turn.status === 'ready' || turn.status === 'error'),
       )
+      .map((turn) => ({
+        ...turn,
+        at: typeof turn.at === 'number' ? turn.at : Date.now(),
+      }))
       .slice(-MAX_STORED);
   } catch {
     return [];
@@ -114,50 +138,50 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function leadText(answer: DorarAnswer): string {
-  // Stored conversations keep only the first few hadiths, so the total the
-  // worker reported is what the reader should see.
-  const count = answer.total ?? answer.hadiths.length;
-  if (count === 0) {
-    return 'لم أجد حديثاً مطابقاً في الدرر السنية. جرّب صياغة أقصر أو كلمة أخرى، أو افتح البحث الكامل.';
-  }
-  if (answer.hadiths.every((hadith) => hadith.rank === 0)) {
-    return `وجدت ${arabicNumber(count)} نتيجة، لكن خلاصة حكم المحدّثين عليها ضعيفة الإسناد. لا يصح الاعتماد عليها، راجع النتائج الكاملة والحكم بنصّه.`;
-  }
-  return `وجدت ${arabicNumber(count)} نتيجة في موسوعة الدرر السنية، مرتّبة بحسب درجة الحديث. الحكم المذكور هو نصّ الدرر، وليس فتوى.`;
-}
-
-function HadithCard({ hadith, index }: { hadith: DorarHadith; index: number }) {
-  const meta: [string, string][] = [
+function hadithMeta(hadith: DorarHadith): string {
+  return [
     ['الراوي', hadith.narrator],
     ['المحدث', hadith.scholar],
     ['المصدر', hadith.source],
     ['الرقم', hadith.reference],
-  ].filter(([, value]) => Boolean(value)) as [string, string][];
+  ]
+    .filter(([, value]) => Boolean(value))
+    .map(([label, value]) => `${label}: ${value}`)
+    .join(' · ');
+}
 
+function Typing() {
   return (
-    <li className="ask-hadith">
-      <div className="ask-hadith-head">
+    <span className="chat-typing" role="status" aria-label="أبحث في الدرر">
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
+function HadithBubble({
+  hadith,
+  index,
+}: {
+  hadith: DorarHadith;
+  index: number;
+}) {
+  const meta = hadithMeta(hadith);
+  return (
+    <li className="chat-msg is-in chat-hadith">
+      <div className="chat-hadith-head">
         <span className={`hadith-grade ${gradeTone(hadith.grade)}`}>
           {hadith.grade || 'حكم غير مذكور'}
         </span>
-        <span className="ask-hadith-index" aria-hidden>
+        <span className="chat-hadith-index" aria-hidden>
           {arabicNumber(index + 1)}
         </span>
       </div>
       <p className="hadith-text" dir="rtl">
         {hadith.text}
       </p>
-      {meta.length ? (
-        <dl className="ask-meta">
-          {meta.map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
+      {meta ? <p className="chat-hadith-meta">{meta}</p> : null}
     </li>
   );
 }
@@ -165,7 +189,8 @@ function HadithCard({ hadith, index }: { hadith: DorarHadith; index: number }) {
 export function Ask() {
   const [turns, setTurns] = useState<Turn[]>(loadTurns);
   const [input, setInput] = useState('');
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const wallRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -181,9 +206,11 @@ export function Ask() {
 
   const busy = turns.some((turn) => turn.status === 'pending');
 
+  // المحادثة تُفتح على آخر رسالة، كما في تطبيقات الدردشة.
   useEffect(() => {
-    if (!turns.length) return;
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const wall = wallRef.current;
+    if (!wall) return;
+    wall.scrollTop = wall.scrollHeight;
   }, [turns]);
 
   const run = useCallback(async (id: string, question: string) => {
@@ -224,11 +251,13 @@ export function Ask() {
       const id = newId();
       setInput('');
       setTurns((prev) =>
-        [...prev, { id, question, status: 'pending' as const }].slice(
-          -MAX_STORED,
-        ),
+        [
+          ...prev,
+          { id, question, at: Date.now(), status: 'pending' as const },
+        ].slice(-MAX_STORED),
       );
       void run(id, question);
+      inputRef.current?.focus();
     },
     [busy, run],
   );
@@ -254,109 +283,92 @@ export function Ask() {
   }, []);
 
   return (
-    <div className="stack ask-page">
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">من موسوعة الدرر السنية</p>
-          <h1>اسأل الدرر</h1>
-        </div>
-        {turns.length ? (
-          <button className="btn btn-ghost btn-sm" onClick={clear}>
-            <Trash2 size={15} aria-hidden />
-            مسح المحادثة
-          </button>
-        ) : (
-          <span className="brand-mark" aria-label="تدبّر">
-            تدبّر
-          </span>
-        )}
+    <div className="chat">
+      <header className="chat-head">
+        <span className="chat-avatar" aria-hidden>
+          <BookMarked size={20} />
+        </span>
+        <span className="chat-id">
+          <strong>الدرر السنية</strong>
+          <small>{busy ? 'يكتب…' : 'موسوعة الحديث · متصل'}</small>
+        </span>
+        <span className="chat-head-actions">
+          <a
+            className="chat-icon-btn"
+            href="https://dorar.net"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="فتح موقع الدرر السنية"
+          >
+            <ExternalLink size={17} />
+          </a>
+          {turns.length ? (
+            <button
+              className="chat-icon-btn"
+              type="button"
+              onClick={clear}
+              aria-label="مسح المحادثة"
+            >
+              <Trash2 size={17} />
+            </button>
+          ) : null}
+        </span>
       </header>
 
-      <section className="card ask-intro">
-        <span className="ask-intro-icon">
-          <BookMarked size={24} aria-hidden />
-        </span>
-        <div>
-          <strong>اسأل عن حديث أو حكم، والجواب من الدرر</strong>
-          <p className="muted small">
-            يبحث التطبيق في موسوعة الدرر السنية ويعرض لك نصّ الحديث والراوي
-            والمحدّث والمصدر وخلاصة الحكم كما ذكرها الموقع. الإجابات منقولة لا
-            مُستنتجة، وليست فتوى شخصية.
-          </p>
-        </div>
-      </section>
+      <div className="chat-wall" ref={wallRef}>
+        <p className="chat-day" aria-hidden>
+          اليوم
+        </p>
+        <p className="chat-notice">
+          الرسائل تُنقل من موسوعة الدرر السنية، والحكم بنصّه لا استنتاجاً.
+        </p>
 
-      <form
-        className="ask-composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          ask(input);
-        }}
-      >
-        <label className="sr-only" htmlFor="ask-input">
-          سؤالك للدرر السنية
-        </label>
-        <MessageCircle size={19} aria-hidden className="ask-composer-icon" />
-        <input
-          id="ask-input"
-          type="text"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="مثال: ما حكم الغيبة؟"
-          autoComplete="off"
-          enterKeyHint="send"
-          maxLength={300}
-        />
-        <button
-          className="ask-send"
-          type="submit"
-          disabled={busy || input.trim().length < 2}
-          aria-label="أرسل السؤال"
-        >
-          {busy ? (
-            <Loader2 size={18} className="spin" aria-hidden />
-          ) : (
-            <Send size={18} aria-hidden />
-          )}
-        </button>
-      </form>
+        {turns.length === 0 ? (
+          <>
+            <div className="chat-msg is-in">
+              <p>{WELCOME}</p>
+            </div>
+            <div className="chat-suggestions">
+              <p className="chat-suggestions-title">جرّب أحد هذه الأسئلة:</p>
+              <div className="chat-chips">
+                {SUGGESTIONS.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    className="chat-chip"
+                    type="button"
+                    onClick={() => ask(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : null}
 
-      {turns.length === 0 ? (
-        <section className="ask-empty" aria-label="أسئلة مقترحة">
-          <p className="muted small">جرّب أحد هذه الأسئلة:</p>
-          <div className="ask-suggestions">
-            {SUGGESTIONS.map((suggestion) => (
-              <button
-                key={suggestion}
-                className="ask-suggestion"
-                onClick={() => ask(suggestion)}
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-          <p className="muted small center ask-empty-hint">
-            يُخزّن آخر {arabicNumber(MAX_STORED)} أسئلة على جهازك فقط. لا
-            يُرسل السؤال إلى أي جهة غير خدمة البحث في الدرر.
-          </p>
-        </section>
-      ) : (
-        <div className="ask-thread">
-          {turns.map((turn) => (
-            <article className="ask-turn" key={turn.id}>
-              <p className="ask-question">{turn.question}</p>
+        {turns.map((turn) => {
+          const seed = seedFor(turn.id);
+          return (
+            <div className="chat-turn" key={turn.id}>
+              <div className="chat-msg is-out">
+                <p>{turn.question}</p>
+                <span className="chat-meta">
+                  <time>{clock(turn.at)}</time>
+                  <CheckCheck size={13} aria-hidden />
+                </span>
+              </div>
 
               {turn.status === 'pending' ? (
-                <div className="ask-pending" aria-live="polite">
-                  <Loader2 size={18} className="spin" aria-hidden />
-                  <span>أبحث في الدرر السنية…</span>
+                <div className="chat-msg is-in is-typing">
+                  <Typing />
                 </div>
               ) : turn.status === 'error' ? (
-                <div className="card ask-error" role="alert">
+                <div className="chat-msg is-in is-error" role="alert">
                   <p>{errorMessage(turn.error)}</p>
-                  <div className="ask-error-actions">
+                  <div className="chat-error-actions">
                     <button
-                      className="btn btn-secondary btn-sm"
+                      className="chat-action"
+                      type="button"
                       onClick={() => retry(turn)}
                       disabled={busy}
                     >
@@ -364,7 +376,7 @@ export function Ask() {
                       أعد المحاولة
                     </button>
                     <a
-                      className="btn btn-ghost btn-sm"
+                      className="chat-action"
                       href={dorarSearchUrl(dorarQuery(turn.question))}
                       target="_blank"
                       rel="noreferrer"
@@ -373,57 +385,133 @@ export function Ask() {
                       <ExternalLink size={13} aria-hidden />
                     </a>
                   </div>
+                  <span className="chat-meta">
+                    <time>{clock(turn.at)}</time>
+                  </span>
                 </div>
               ) : turn.answer ? (
-                <div className="ask-answer">
-                  <p className="ask-answer-lead">{leadText(turn.answer)}</p>
+                turn.answer.hadiths.length ? (
+                  <>
+                    <div className="chat-msg is-in">
+                      <p className="chat-greeting">{openingFor(seed)}</p>
+                      <p>
+                        {countLine(
+                          turn.answer.query,
+                          turn.answer.total ?? turn.answer.hadiths.length,
+                        )}
+                      </p>
+                      {turn.answer.hadiths.every(
+                        (hadith) => hadith.rank === 0,
+                      ) ? (
+                        <p className="chat-warning">{weakFor(seed)}</p>
+                      ) : null}
+                      <span className="chat-meta">
+                        <time>{clock(turn.at)}</time>
+                      </span>
+                    </div>
 
-                  {turn.answer.hadiths.length ? (
-                    <ol className="ask-results">
+                    <ol className="chat-results">
                       {turn.answer.hadiths
                         .slice(0, MAX_SHOWN)
                         .map((hadith, index) => (
-                          <HadithCard
+                          <HadithBubble
                             key={`${turn.id}-${index}`}
                             hadith={hadith}
                             index={index}
                           />
                         ))}
                     </ol>
-                  ) : null}
 
-                  <div className="ask-answer-actions">
-                    <a
-                      className="btn btn-secondary btn-sm"
-                      href={turn.answer.moreUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink size={14} aria-hidden />
-                      كل النتائج في الدرر
-                    </a>
-                    {(turn.answer.total ?? turn.answer.hadiths.length) >
-                    MAX_SHOWN ? (
-                      <span className="muted small">
-                        عُرض {arabicNumber(MAX_SHOWN)} من{' '}
-                        {arabicNumber(
-                          turn.answer.total ?? turn.answer.hadiths.length,
-                        )}
+                    <div className="chat-msg is-in is-foot">
+                      <p className="chat-note">{DISCLAIMER}</p>
+                      <div className="chat-foot-actions">
+                        <a
+                          className="chat-action"
+                          href={turn.answer.moreUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <ExternalLink size={14} aria-hidden />
+                          كل النتائج في الدرر
+                        </a>
+                        {(turn.answer.total ?? turn.answer.hadiths.length) >
+                        MAX_SHOWN ? (
+                          <span className="chat-shown">
+                            عُرض {arabicNumber(MAX_SHOWN)} من{' '}
+                            {arabicNumber(
+                              turn.answer.total ?? turn.answer.hadiths.length,
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
+                      <span className="chat-meta">
+                        <time>{clock(turn.at)}</time>
                       </span>
-                    ) : null}
+                    </div>
+                  </>
+                ) : (
+                  <div className="chat-msg is-in">
+                    <p className="chat-greeting">{missingFor(seed)}</p>
+                    <p>{NOT_FOUND}</p>
+                    <div className="chat-foot-actions">
+                      <a
+                        className="chat-action"
+                        href={turn.answer.moreUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ExternalLink size={14} aria-hidden />
+                        البحث في الدرر
+                      </a>
+                    </div>
+                    <span className="chat-meta">
+                      <time>{clock(turn.at)}</time>
+                    </span>
                   </div>
-                </div>
+                )
               ) : null}
-            </article>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-      )}
+            </div>
+          );
+        })}
 
-      <p className="muted small center">
-        المصدر: موسوعة الدرر السنية · الأحكام تُنقل بنصّها من الموقع، ويُرجع في
-        النوازل إلى أهل العلم.
-      </p>
+      </div>
+
+      <form
+        className="chat-composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          ask(input);
+        }}
+      >
+        <label className="sr-only" htmlFor="chat-input">
+          سؤالك للدرر السنية
+        </label>
+        <div className="chat-field">
+          <input
+            id="chat-input"
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="اكتب سؤالك…"
+            autoComplete="off"
+            enterKeyHint="send"
+            maxLength={300}
+          />
+          <button
+            className="chat-send"
+            type="submit"
+            disabled={busy || input.trim().length < 2}
+            aria-label="أرسل السؤال"
+          >
+            {busy ? (
+              <Loader2 size={19} className="spin" aria-hidden />
+            ) : (
+              <Send size={19} aria-hidden />
+            )}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

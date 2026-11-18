@@ -342,7 +342,23 @@ export function Ask() {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 75000);
     try {
-      const answer = await askDorar(question, undefined, controller.signal);
+      let answer: DorarAnswer;
+      try {
+        answer = await askDorar(question, undefined, controller.signal);
+      } catch (error) {
+        // العامل يفتح متصفحاً واحداً؛ قد يفشل فتحه لحظة انشغال الجلسة السابقة
+        // فيرجع 502 سريعاً. محاولة ثانية بعد لحظتين تُنجح الطلب غالباً، ولا
+        // تُخفى الأخطاء الحقيقية لأن غير هذا الرمز يُرفع كما هو.
+        if (
+          (error as Error).name === 'AbortError' ||
+          !(error instanceof DorarError) ||
+          error.code !== 'upstream-blocked'
+        ) {
+          throw error;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        answer = await askDorar(question, undefined, controller.signal);
+      }
       if (!mountedRef.current) return;
       setTurns((prev) =>
         prev.map((turn) =>

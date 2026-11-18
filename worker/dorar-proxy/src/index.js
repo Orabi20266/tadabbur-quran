@@ -313,7 +313,12 @@ export default {
 
     const anyOk = sources.some((source) => payloadSources[source].ok);
     if (!anyOk) {
-      return json({ ok: false, error: 'upstream-blocked' }, 502, cors);
+      // تفاصيل الفشل تُعاد للتشخيص؛ العميل يعرض رسالة عامة.
+      return json(
+        { ok: false, error: 'upstream-blocked', sources: payloadSources },
+        502,
+        cors,
+      );
     }
     const allOk = sources.every((source) => payloadSources[source].ok);
 

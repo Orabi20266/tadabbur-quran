@@ -223,6 +223,17 @@ describe('matchesQuery', () => {
 });
 
 describe('cleanItems', () => {
+  it('drops dangling punctuation at the start of an excerpt', () => {
+    const [item] = cleanItems([
+      {
+        text: '  )) للرُّحَيْباني (3/316). وذلك للآتي',
+        meta: 'كتاب',
+        url: 'https://dorar.net/feqhia/1',
+      },
+    ]);
+    expect(item.text).toBe('للرُّحَيْباني (3/316). وذلك للآتي');
+  });
+
   it('keeps dorar links, strips markup, dedupes and limits', () => {
     const items = cleanItems([
       {

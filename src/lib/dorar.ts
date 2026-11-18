@@ -403,9 +403,13 @@ export function cleanItems(raw: unknown, limit = 12): DorarItem[] {
     const record = entry as Record<string, unknown>;
     const url = typeof record.url === 'string' ? record.url.trim() : '';
     if (!url.startsWith('https://dorar.net/')) continue;
+    // مقتطفات الدرر تبدأ أحياناً في وسط جملة، فتظهر علامات ترقيم معلّقة مثل
+    // «))» في أول الفقاعة. تُزال وحدها دون المساس بنصّ المقتطف.
     const text = htmlToText(
       typeof record.text === 'string' ? record.text : '',
-    ).slice(0, 600);
+    )
+      .replace(/^[\s.،؛:()\[\]{}«»"'\-–—]+/u, '')
+      .slice(0, 600);
     if (text.length < 3) continue;
     if (seen.has(url)) continue;
     seen.add(url);

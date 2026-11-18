@@ -3611,3 +3611,110 @@ input[type='range'] {
     font-size: 18px;
   }
 }
+
+/* ---------- نتائج موسوعات الدرر داخل المحادثة ---------- */
+
+.chat-list-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 2px;
+}
+
+.chat-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.chat-mini:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.chat-hadith-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* مقتطف موسوعة غير حديثية */
+.chat-item {
+  max-width: 94%;
+  padding: 4px 4px 4px 6px;
+}
+
+.chat-item-body {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.chat-item-body:hover {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+
+.chat-item-text {
+  display: block;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+
+.chat-item-text.is-clamped {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.chat-item-meta {
+  display: block;
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.chat-item-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 6px 0;
+}
+
+.chat-item-foot .chat-mini svg {
+  transition: transform var(--fast) var(--ease);
+}
+
+.chat-item-foot .chat-mini .is-flipped,
+.chat-list-foot .chat-action .is-flipped {
+  transform: rotate(180deg);
+}
+
+@media (max-width: 380px) {
+  .chat-item {
+    max-width: 98%;
+  }
+}

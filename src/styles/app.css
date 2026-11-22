@@ -3718,3 +3718,162 @@ input[type='range'] {
     max-width: 98%;
   }
 }
+
+/* ---------- Nawawi hadith: selection and recitation ---------- */
+
+.hadith-card-title {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.hadith-isnad {
+  margin: 0;
+  font-family: var(--font-quran);
+  font-size: 15.5px;
+  line-height: 1.85;
+  color: var(--text-muted);
+}
+
+.hadith-progress {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.hadith-action.is-primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.hadith-mode-list {
+  display: grid;
+  gap: 8px;
+}
+
+.hadith-mode {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card, 14px);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.hadith-mode:hover,
+.hadith-mode:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.hadith-mode strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.hadith-mode-done {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 12px;
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hadith-recite,
+.hadith-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hadith-recite .session-strip {
+  flex-wrap: wrap;
+}
+
+.session-strip-spacer {
+  flex: 1 1 auto;
+}
+
+.hadith-passage {
+  font-family: var(--font-quran);
+  font-size: 24px;
+  line-height: 2.35;
+  word-spacing: 0.12em;
+  padding: 12px 4px;
+}
+
+.hadith-passage .word.is-hidden.is-wrong {
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.hadith-recite-hint {
+  text-align: center;
+}
+
+.hadith-mistakes {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  font-size: 13px;
+}
+
+.hadith-mistakes ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hadith-mistakes li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 9px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+}
+
+.hadith-mistake-word {
+  color: var(--danger);
+  font-family: var(--font-quran);
+  font-size: 17px;
+}
+
+.hadith-summary {
+  align-items: center;
+  text-align: center;
+  padding: 30px 18px;
+}
+
+.hadith-summary h2 {
+  margin: 0;
+}
+
+.hadith-summary-check {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.hadith-summary .hadith-actions {
+  justify-content: center;
+  flex-wrap: wrap;
+  border: 0;
+}

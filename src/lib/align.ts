@@ -179,6 +179,12 @@ export function wordScore(heard: string, expected: string): number {
   const core = scoreCore(heard, expected);
   if (core > 0) return core;
 
+  // «فِي ٱلۡأُمِّيِّـۧنَ» is commonly heard as «للأميين»: the ي of في drops
+  // and the article's ل is doubled before the following alif/hamza. Compare
+  // that sound only for ال + ا words, so unrelated words stay strict.
+  const assimilatedArticle = assimilatedArticleScore(heard, expected);
+  if (assimilatedArticle > 0) return assimilatedArticle;
+
   // A dropped or extra attached particle: «كأس» for «وكأسا». Only for
   // words long enough that the particle is not the whole meaning: dropping the
   // و of «ولم» or «وما» makes another real word, so those stay strict.
@@ -202,6 +208,21 @@ export function wordScore(heard: string, expected: string): number {
     return best;
   }
   return 0;
+}
+
+/**
+ * The article's alif is not pronounced after a preceding particle, and the
+ * recogniser often writes the resulting double ل as «لل». Turn «الا…» into
+ * «لا…» on both sides before comparing, but only when the heard token begins
+ * with a joining particle followed by ل. This is deliberately narrow: it
+ * fixes «للأميين» (٦٢:٢) and words like it without accepting arbitrary words
+ * that merely share a couple of letters.
+ */
+function assimilatedArticleScore(heard: string, expected: string): number {
+  if (expected.length < 5 || !expected.startsWith('\u0627\u0644\u0627')) return 0;
+  if (heard.length < 4 || !JOINING_PARTICLE.has(heard[0])) return 0;
+  if (heard[1] !== '\u0644') return 0;
+  return scoreCore(heard.slice(1), `\u0644${expected.slice(2)}`);
 }
 
 /** The matching rules that do not move letters between positions. */
@@ -317,6 +338,21 @@ function assimilatedJoin(words: string[]): string {
   return out;
 }
 
+/**
+ * The same article assimilation across a word the recogniser merged with the
+ * following word: «فِي ٱلۡأُمِّيِّـۧنَ» → «فيلأميين». Only ال + ا words that
+ * are long enough to be a real word are changed.
+ */
+function assimilatedArticleJoin(words: string[]): string {
+  return words
+    .map((word) =>
+      word.length >= 5 && word.startsWith('\u0627\u0644\u0627')
+        ? `\u0644${word.slice(2)}`
+        : word,
+    )
+    .join('');
+}
+
 /** Match a token against the expected words starting at `expected[0]`. */
 export function matchAt(
   token: string,
@@ -339,13 +375,18 @@ export function matchAt(
     // «من ربك» is heard «مر ربك», so the recognised token may match the
     // assimilated join exactly.
     const assimilated = assimilatedJoin(words);
-    if (token === joined || (!strict && token === assimilated)) {
+    const article = assimilatedArticleJoin(words);
+    if (token === joined || (!strict && (token === assimilated || token === article))) {
       return { span, score: 1 };
     }
     // Only trust a fuzzy merged match when the token is clearly longer than a
     // single word, otherwise we would skip words on ordinary noisy matches.
     if (!strict && token.length >= 5) {
-      const score = Math.max(similarity(token, joined), similarity(token, assimilated));
+      const score = Math.max(
+        similarity(token, joined),
+        similarity(token, assimilated),
+        similarity(token, article),
+      );
       if (score >= 0.85 && (!best || score > best.score)) {
         best = { span, score };
       }

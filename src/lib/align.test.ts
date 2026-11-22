@@ -3,6 +3,7 @@ import {
   alignToken,
   levenshtein,
   matchAt,
+  normalizeToken,
   similarity,
   splitTranscript,
   tokenizeTranscript,
@@ -152,6 +153,24 @@ describe('word matching', () => {
     // Forward skipping is stricter and must not use the assimilated form.
     expect(matchAt('مرربك', ['من', 'ربك'], true)).toBeNull();
   });
+
+  it('accepts «للأميين» for the Uthmani word of ٦٢:٢', () => {
+    const expected = normalizeToken('ٱلۡأُمِّيِّـۧنَ');
+    expect(expected).toBe('الامين');
+    for (const heard of ['للأميين', 'للأمييين', 'بالأميين']) {
+      expect(wordScore(normalizeToken(heard), expected)).toBeGreaterThan(0.8);
+    }
+    // Unrelated words that merely start with ل are still rejected.
+    expect(wordScore('للناس', expected)).toBe(0);
+    expect(wordScore('للدين', expected)).toBe(0);
+  });
+
+  it('matches a merged «فيلأميين» as في + الأميين', () => {
+    const words = ['في', normalizeToken('ٱلۡأُمِّيِّـۧنَ'), 'رسولا'];
+    const merged = matchAt(normalizeToken('فيلأميين'), words);
+    expect(merged?.span).toBe(2);
+    expect(merged?.score ?? 0).toBeGreaterThan(0.85);
+  });
 });
 
 describe('alignment', () => {
@@ -232,5 +251,19 @@ describe('alignment', () => {
   it('does not rewind on a fuzzy earlier match', () => {
     const words = ['قل', 'هو', 'الرحمن', 'أحد', 'و', 'ز'];
     expect(alignToken('الرحمان', words, 5).kind).toBe('none');
+  });
+
+  it('keeps the cursor on the word after في when «للأميين» is heard', () => {
+    const words = ['في', normalizeToken('ٱلۡأُمِّيِّـۧنَ'), 'رسولا'];
+    expect(alignToken(normalizeToken('للأميين'), words, 1)).toMatchObject({
+      kind: 'match',
+      offset: 0,
+      span: 1,
+    });
+    expect(alignToken(normalizeToken('فيلأميين'), words, 0)).toMatchObject({
+      kind: 'match',
+      offset: 0,
+      span: 2,
+    });
   });
 });

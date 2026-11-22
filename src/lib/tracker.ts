@@ -84,6 +84,13 @@ export interface TranscriptTrackerConfig {  words: DetectorWord[];
    */
   detectTashkeel: boolean;
   dontProgressUntilFixed: boolean;
+  /**
+   * Quran-only conventions. Hadith recitation has no isti'adha/basmalah and no
+   * disconnected letters; leave these on for the Quran and turn them off for
+   * other passages. Both default to true so existing callers are unchanged.
+   */
+  detectPreamble?: boolean;
+  detectMuqattaat?: boolean;
   onEvent: (word: DetectorWord, type: EventType, meta?: TrackerMeta) => void;
   onBlocked: (blocked: boolean) => void;
   onDone: () => void;
@@ -165,7 +172,10 @@ export class TranscriptTracker {
     const end = Math.min(this.cfg.words.length, this.cursor + words);
     for (let i = this.cursor; i < end; i++) {
       const word = this.cfg.words[i];
-      const letters = muqattaahAt(word.surah, word.ayah, word.index);
+      const letters =
+        this.cfg.detectMuqattaat === false
+          ? null
+          : muqattaahAt(word.surah, word.ayah, word.index);
       if (letters) {
         out.push(...spokenPhrases(letters));
         continue;
@@ -264,6 +274,7 @@ export class TranscriptTracker {
    * the ordinary alignment must not also process it.
    */
   private handleLetters(heard: string, token: string): boolean {
+    if (this.cfg.detectMuqattaat === false) return false;
     const word = this.cfg.words[this.cursor];
     if (!word) return false;
     const mq = muqattaahAt(word.surah, word.ayah, word.index);
@@ -369,6 +380,7 @@ export class TranscriptTracker {
    * «الله» or «من».
    */
   private handlePreamble(token: string): boolean {
+    if (this.cfg.detectPreamble === false) return false;
     const expected = this.cfg.normalized[this.cursor] ?? '';
     // Never swallow the word being tracked. The second word of the basmalah is
     // «الله», which is also the first word of ayahs such as 2:255, and it must

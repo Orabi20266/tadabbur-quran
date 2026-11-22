@@ -101,6 +101,7 @@ export function HadithPage() {
   const [phase, setPhase] = useState<Phase>('list');
   const [copied, setCopied] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Record<string, WordStatus>>({});
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [cursor, setCursor] = useState(0);
   const [mistakes, setMistakes] = useState<ReciteMistake[]>([]);
   const [hidden, setHidden] = useState(true);
@@ -119,6 +120,7 @@ export function HadithPage() {
   const wordByKeyRef = useRef<Record<string, PassageWord>>({});
   const cursorRef = useRef(0);
   const statusesRef = useRef<Record<string, WordStatus>>({});
+  const revealedRef = useRef<Record<string, boolean>>({});
   const mistakesRef = useRef<ReciteMistake[]>([]);
   const eventRef = useRef<(word: DetectorWord, type: EventType, meta?: TrackerMeta) => void>(
     () => {},
@@ -188,6 +190,7 @@ export function HadithPage() {
       wordByKeyRef.current = Object.fromEntries(words.map((word) => [word.key, word]));
       cursorRef.current = 0;
       statusesRef.current = {};
+      revealedRef.current = {};
       mistakesRef.current = [];
       pendingTokensRef.current = [];
       pausedRef.current = false;
@@ -197,6 +200,7 @@ export function HadithPage() {
 
       primeMistakeSound();
       setStatuses({});
+      setRevealed({});
       setMistakes([]);
       setCursor(0);
       setHidden(true);
@@ -246,6 +250,14 @@ export function HadithPage() {
     const next = { ...statusesRef.current, [word.key]: type };
     statusesRef.current = next;
     setStatuses(next);
+
+    // A word the reader has actually recited stays visible from then on, just
+    // as on the Quran page. A word only guessed wrong stays hidden until it is
+    // corrected, so the answer is never given away early.
+    if ((type === 'correct' || type === 'tashkeel') && !revealedRef.current[word.key]) {
+      revealedRef.current = { ...revealedRef.current, [word.key]: true };
+      setRevealed(revealedRef.current);
+    }
 
     if (type === 'correct') {
       const kept = mistakesRef.current.filter((item) => item.key !== word.key);
@@ -487,24 +499,32 @@ export function HadithPage() {
             ) : null}
 
             <div className="hadith-passage" dir="rtl">
-              {words.map((word, index) => (
-                <Fragment key={word.key}>
-                  <WordSpan
-                    text={word.text}
-                    status={statuses[word.key] ?? 'neutral'}
-                    hidden={hidden}
-                    history="none"
-                    current={index === cursor && phase === 'live'}
-                    active={index === cursor - 1}
-                  />{' '}
-                </Fragment>
-              ))}
+              {words.map((word, index) => {
+                const status = statuses[word.key] ?? 'neutral';
+                const isHidden =
+                  hidden &&
+                  !revealed[word.key] &&
+                  status !== 'wrong' &&
+                  status !== 'tashkeel';
+                return (
+                  <Fragment key={word.key}>
+                    <WordSpan
+                      text={word.text}
+                      status={status}
+                      hidden={isHidden}
+                      history="none"
+                      current={index === cursor && phase === 'live'}
+                      active={index === cursor - 1}
+                    />{' '}
+                  </Fragment>
+                );
+              })}
             </div>
 
             <p className="muted small hadith-recite-hint">
               {currentWord && !hidden
                 ? `الكلمة التالية: ${currentWord.text}`
-                : 'النص مخفي. اقرأ من الحفظ، ثم أظهر النص إن احتجت إلى مراجعة.'}
+                : 'النص مخفي. اقرأ من الحفظ، وستظهر كل كلمة تسمعها بعد تسميعها. يمكنك إظهار النص كاملاً إن احتجت.'}
             </p>
 
             {mistakes.length ? (

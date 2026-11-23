@@ -3,6 +3,7 @@ import {
   countLine,
   DISCLAIMER,
   missingFor,
+  NO_ANSWER,
   NO_AUTHENTIC,
   openingFor,
   PARTIAL,
@@ -22,10 +23,16 @@ describe('chatLines', () => {
 
   it('never claims a ruling in the greeting', () => {
     for (let seed = 0; seed < 14; seed += 1) {
-      const line = `${openingFor(seed)} ${missingFor(seed)} ${WELCOME} ${NO_AUTHENTIC} ${PARTIAL}`;
+      const line = `${openingFor(seed)} ${missingFor(seed)} ${WELCOME} ${NO_AUTHENTIC} ${PARTIAL} ${NO_ANSWER}`;
       expect(line).not.toMatch(/حلال|حرام|يجوز|لا يجوز/);
       expect(line.length).toBeGreaterThan(10);
     }
+  });
+
+  it('admits when there is no answer instead of inventing one', () => {
+    expect(NO_ANSWER).toBe('لا أدري بامكانك مراجعة من تثق في علمه في هذه المسألة.');
+    expect(NO_ANSWER).toMatch(/^لا أدري/);
+    expect(NO_ANSWER).not.toMatch(/الموسوعة|الدرر|فتوى|حكم/);
   });
 
   it('keeps the greeting short and free of encyclopedia lists', () => {

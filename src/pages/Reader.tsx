@@ -826,6 +826,17 @@ export function Reader() {
           style={{ fontSize: `${settings.fontSize}px` }}
           aria-label={`سورة ${sData.name}`}
         >
+          <header className="mushaf-page-head">
+            <div className="mushaf-page-title">
+              <span className="mushaf-rule" aria-hidden />
+              <h2>{sData.name}</h2>
+              <span className="mushaf-rule" aria-hidden />
+            </div>
+            <small>
+              الآيات {arabicNumber(from)}–{arabicNumber(to)}
+            </small>
+          </header>
+
           {surah !== 1 && surah !== 9 ? (
             <p className="bismillah">بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ</p>
           ) : null}

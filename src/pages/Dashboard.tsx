@@ -1,5 +1,16 @@
 import { Link } from 'react-router-dom';
-import { ArrowLeft, BookmarkCheck, Flame, MessageCircle, Play, Sparkles, Target, TriangleAlert } from 'lucide-react';
+import {
+  ArrowLeft,
+  BookMarked,
+  BookOpen,
+  Flame,
+  GraduationCap,
+  MessageCircle,
+  Play,
+  Sparkles,
+  Target,
+  TriangleAlert,
+} from 'lucide-react';
 import { useApp, todayKey, highlightLevel, memorizedCount } from '../lib/store';
 import { getSurah, arabicNumber, wordsOf } from '../lib/quran';
 
@@ -47,9 +58,38 @@ export function Dashboard() {
   }).format(new Date());
 
   const continueSurah = getSurah(lastRead.surah);
+  const readHref = `/read/${lastRead.surah}?ayah=${lastRead.ayah}`;
+  const startHref = `${readHref}&session=1`;
+
+  const shortcuts = [
+    {
+      to: '/hadith',
+      icon: BookMarked,
+      title: 'تسميع الحديث',
+      text: 'الأربعون النووية، بالسند أو المتن.',
+    },
+    {
+      to: '/ask',
+      icon: MessageCircle,
+      title: 'اسأل الدرر',
+      text: 'جواب منقول بنصّه مع مصدره.',
+    },
+    {
+      to: '/tafsir',
+      icon: BookOpen,
+      title: 'التفسير',
+      text: 'افهم الآية وسياقها.',
+    },
+    {
+      to: '/tajweed',
+      icon: GraduationCap,
+      title: 'التجويد',
+      text: 'دروس قصيرة وتطبيقات.',
+    },
+  ];
 
   return (
-    <div className="stack">
+    <div className="stack home">
       <header className="page-head">
         <div>
           <p className="eyebrow">{dateLabel}</p>
@@ -60,98 +100,102 @@ export function Dashboard() {
         </span>
       </header>
 
-      <section className="card streak-card" aria-label="سلسلة الأيام">
-        <div className="streak-flame">
-          <Flame size={26} aria-hidden />
+      {/* خطوة واحدة واضحة: لا يختار المستخدم بين ثلاث بطاقات متشابهة. */}
+      <section className="card home-hero" aria-labelledby="home-start-title">
+        <div className="home-hero-head">
+          <Ring value={doneAyahs} max={goalAyahs} />
+          <div className="home-hero-copy">
+            <p className="eyebrow">
+              <Target size={14} aria-hidden /> هدف اليوم
+            </p>
+            <h2 id="home-start-title">ابدأ جلسة الحفظ</h2>
+            <p className="home-hero-place">
+              {continueSurah.name} · الآية {arabicNumber(lastRead.ayah)}
+            </p>
+            <p className="muted small">
+              {doneAyahs >= goalAyahs
+                ? 'أتممت هدف اليوم. تقبّل الله.'
+                : `${arabicNumber(doneAyahs)} من ${arabicNumber(goalAyahs)} آيات اليوم — كل آية تُتقنها تُقرّبك من الهدف.`}
+            </p>
+          </div>
         </div>
-        <div className="streak-copy">
-          <strong>
-            {streak.current > 0
-              ? `${streak.current} ${streak.current === 1 ? 'يوم' : 'أيام'} متتالية`
-              : 'ابدأ سلسلتك اليوم'}
-          </strong>
-          <small className="muted">
-            {streak.current === 0
-              ? 'أول جلسة اليوم تشعل السلسلة.'
-              : `أطول سلسلة لك: ${streak.longest} يوم`}
-          </small>
+        <div className="home-hero-actions">
+          <Link className="btn btn-primary" to={startHref}>
+            <Play size={18} aria-hidden />
+            ابدأ التلاوة من الذاكرة
+          </Link>
+          <Link className="btn btn-ghost" to={readHref}>
+            اقرأ الآيات
+          </Link>
         </div>
-        <div className="streak-days" aria-hidden>
-          {Array.from({ length: 7 }).map((_, i) => {
-            const d = new Date();
-            d.setDate(d.getDate() - (6 - i));
-            const key = todayKey(d);
-            return <span key={key} className={streak.days.includes(key) ? 'on' : ''} />;
-          })}
+        <p className="home-hero-note">
+          يظهر النص كلمةً بكلمة أثناء التلاوة، ويتوفّر التتبّع اليدوي عند تعذّر الميكروفون.
+        </p>
+      </section>
+
+      <section className="card home-stats" aria-label="ملخصك">
+        <div className="home-stat">
+          <span className="home-stat-icon is-warm">
+            <Flame size={18} aria-hidden />
+          </span>
+          <span>
+            <strong>{arabicNumber(streak.current)}</strong>
+            <small>يوم متتالي</small>
+          </span>
+        </div>
+        <div className="home-stat">
+          <span className="home-stat-icon">
+            <BookMarked size={18} aria-hidden />
+          </span>
+          <span>
+            <strong>{arabicNumber(memorized)}</strong>
+            <small>آية محفوظة</small>
+          </span>
+        </div>
+        <div className="home-stat">
+          <span className="home-stat-icon">
+            <Target size={18} aria-hidden />
+          </span>
+          <span>
+            <strong>{arabicNumber(totalSessions)}</strong>
+            <small>جلسة تلاوة</small>
+          </span>
+        </div>
+        <div className="home-stat">
+          <span className="home-stat-icon">
+            <Sparkles size={18} aria-hidden />
+          </span>
+          <span>
+            <strong>{arabicNumber(weak.length)}</strong>
+            <small>للمراجعة</small>
+          </span>
         </div>
       </section>
 
-      <section className="card goal-card">
-        <Ring value={doneAyahs} max={goalAyahs} />
-        <div className="goal-copy">
-          <p className="eyebrow">
-            <Target size={14} aria-hidden /> هدف اليوم
-          </p>
-          <strong>
-            {doneAyahs} من {goalAyahs} آيات
-          </strong>
-          <small className="muted">
-            {doneAyahs >= goalAyahs
-              ? 'أتممت هدف اليوم. تقبّل الله.'
-              : 'كل آية تُتقنها تُقرّبك من الهدف.'}
-          </small>
+      <section className="home-section" aria-labelledby="home-links-title">
+        <div className="section-head">
+          <h2 className="section-title" id="home-links-title">
+            ماذا تريد أن تفعل؟
+          </h2>
         </div>
-        <Link className="btn btn-primary" to={`/read/${lastRead.surah}?ayah=${lastRead.ayah}&session=1`}>
-          <Play size={17} aria-hidden />
-          ابدأ
-        </Link>
+        <div className="quick-grid">
+          {shortcuts.map(({ to, icon: Icon, title, text }) => (
+            <Link className="card quick-card" to={to} key={to}>
+              <span className="quick-icon">
+                <Icon size={20} aria-hidden />
+              </span>
+              <strong>{title}</strong>
+              <small className="muted">{text}</small>
+              <ArrowLeft className="quick-arrow" size={17} aria-hidden />
+            </Link>
+          ))}
+        </div>
       </section>
 
-      <Link className="card continue-card" to={`/read/${lastRead.surah}?ayah=${lastRead.ayah}`}>
-        <div className="continue-icon">
-          <BookmarkCheck size={22} aria-hidden />
-        </div>
-        <div className="continue-copy">
-          <p className="eyebrow">أكمل من حيث توقفت</p>
-          <strong>{continueSurah.name}</strong>
-          <small className="muted">الآية {arabicNumber(lastRead.ayah)}</small>
-        </div>
-        <ArrowLeft size={20} aria-hidden />
-      </Link>
-
-      <Link className="card ask-entry" to="/ask">
-        <div className="ask-entry-icon">
-          <MessageCircle size={22} aria-hidden />
-        </div>
-        <div className="ask-entry-copy">
-          <p className="eyebrow">من موسوعة الدرر السنية</p>
-          <strong>اسأل عن حديث أو حكم</strong>
-          <small className="muted">
-            جواب منقول بنصّه مع الراوي والمصدر ودرجة الحديث.
-          </small>
-        </div>
-        <ArrowLeft size={20} aria-hidden />
-      </Link>
-
-      <div className="mini-grid">
-        <div className="card mini">
-          <strong>{arabicNumber(memorized)}</strong>
-          <span>آية محفوظة</span>
-        </div>
-        <div className="card mini">
-          <strong>{arabicNumber(totalSessions)}</strong>
-          <span>جلسة تلاوة</span>
-        </div>
-        <div className="card mini">
-          <strong>{arabicNumber(weak.length)}</strong>
-          <span>كلمات للمراجعة</span>
-        </div>
-      </div>
-
-      <section className="card weak-card">
+      <section className="card weak-card" aria-labelledby="home-review-title">
         <header className="section-head">
-          <h2 className="section-title">
-            <Sparkles size={17} aria-hidden /> نقاط تحتاج مراجعة
+          <h2 className="section-title" id="home-review-title">
+            <Sparkles size={17} aria-hidden /> كلمات تحتاج مراجعة
           </h2>
         </header>
         {weak.length ? (
@@ -167,7 +211,7 @@ export function Dashboard() {
                   <span className="weak-text">
                     <strong className="quran-word">{word}</strong>
                     <small className="muted">
-                      {getSurah(s).name} · الآية {arabicNumber(a)} · أخطأت {st.wrong} مرة
+                      {getSurah(s).name} · الآية {arabicNumber(a)} · أخطأت {arabicNumber(st.wrong)} مرة
                     </small>
                   </span>
                   <Link className="btn btn-ghost btn-sm" to={`/read/${s}?ayah=${a}`}>
@@ -181,7 +225,7 @@ export function Dashboard() {
           <div className="empty">
             <TriangleAlert size={24} aria-hidden />
             <p>لا كلمات مُعلّمة بعد. ابدأ جلسة حفظ ليظهر لك سجلّك.</p>
-            <Link className="btn btn-primary" to={`/read/${lastRead.surah}?ayah=${lastRead.ayah}&session=1`}>
+            <Link className="btn btn-primary" to={startHref}>
               ابدأ جلسة
             </Link>
           </div>
@@ -189,8 +233,7 @@ export function Dashboard() {
       </section>
 
       <p className="muted small center">
-        التتبّع يعمل بالتعرّف الصوتي في المتصفح، ويُفتح كل كلمة فقط عندما تُنطق.
-        عند تعذّر الميكروفون يتوفّر التتبّع اليدوي — راجع الإعدادات.
+        التتبّع بالتعرّف الصوتي في المتصفح، ولا يُفتح إلا ما نطقته فعلاً.
       </p>
     </div>
   );

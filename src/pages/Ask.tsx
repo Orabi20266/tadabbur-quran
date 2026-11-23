@@ -24,6 +24,7 @@ import {
   countLine,
   DISCLAIMER,
   missingFor,
+  NO_ANSWER,
   NO_AUTHENTIC,
   NOT_FOUND,
   openingFor,
@@ -659,14 +660,17 @@ export function Ask() {
                     </span>
                   </div>
                 </>
-              ) : answer ? (
-                <div className="chat-msg is-in">
-                  <p className="chat-greeting">{missingFor(seed)}</p>
-                  <p>{NOT_FOUND}</p>
+              ) : (
+                <div className="chat-msg is-in is-no-answer">
+                  <p className="chat-greeting">{NO_ANSWER}</p>
+                  <p className="chat-note">{missingFor(seed)}</p>
+                  <p className="chat-note">{NOT_FOUND}</p>
                   <div className="chat-foot-actions">
                     <a
                       className="chat-action"
-                      href={answer.moreUrl}
+                      href={
+                        answer?.moreUrl ?? dorarSearchUrl(dorarQuery(turn.question))
+                      }
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -678,7 +682,7 @@ export function Ask() {
                     <time>{clock(turn.at)}</time>
                   </span>
                 </div>
-              ) : null}
+              )}
             </div>
           );
         })}

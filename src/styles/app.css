@@ -398,56 +398,166 @@ h1 {
 
 /* ---------- dashboard ---------- */
 
-.streak-card {
+.home {
+  gap: 14px;
+}
+
+.home-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent-soft) 55%, var(--surface)),
+    var(--surface) 62%
+  );
+}
+
+.home-hero-head {
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
-.streak-flame {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
-.streak-copy {
+.home-hero-copy {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1;
 }
 
-.streak-copy strong {
-  font-size: 17px;
+.home-hero-copy h2 {
+  font-size: 21px;
+  line-height: 1.35;
 }
 
-.streak-days {
-  display: flex;
-  gap: 4px;
-  margin-inline-start: auto;
+.home-hero-place {
+  font-family: var(--font-quran);
+  font-size: 19px;
+  line-height: 1.6;
+  color: var(--accent-strong);
 }
 
-.streak-days span {
-  width: 7px;
-  height: 22px;
-  border-radius: 4px;
-  background: var(--surface-2);
+.home-hero-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 9px;
 }
 
-.streak-days span.on {
-  background: var(--accent);
+.home-hero-note {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.7;
 }
 
-.goal-card {
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 12px 8px;
+}
+
+.home-stat {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 4px;
+  text-align: start;
+}
+
+.home-stat > span:last-child {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.home-stat strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-stat small {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.home-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--on-accent-soft);
+}
+
+.home-stat-icon.is-warm {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.home-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quick-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-height: 108px;
+  padding: 13px 36px 13px 13px;
+  color: inherit;
+  transition: border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+
+.quick-card:hover {
+  border-color: var(--border-input);
+  transform: translateY(-1px);
+}
+
+.quick-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 3px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--on-accent-soft);
+}
+
+.quick-card strong {
+  font-size: 15px;
+}
+
+.quick-card small {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.quick-arrow {
+  position: absolute;
+  inset-block-start: 14px;
+  inset-inline-end: 13px;
+  color: var(--text-muted);
 }
 
 .ring {
@@ -520,32 +630,6 @@ h1 {
 
 .continue-copy strong {
   font-size: 16px;
-}
-
-.mini-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-
-.card.mini {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  padding: 14px 8px;
-  border-radius: var(--radius-md);
-  text-align: center;
-}
-
-.card.mini strong {
-  font-size: 22px;
-  font-variant-numeric: tabular-nums;
-}
-
-.card.mini span {
-  font-size: 12px;
-  color: var(--text-muted);
 }
 
 .weak-list li {
@@ -1169,23 +1253,74 @@ h1 {
 
 .mushaf-wrap {
   flex: 1;
-  padding: 6px 14px 0;
+  padding: 10px 12px 0;
 }
 
+/* صفحة مصحف: ورق دافئ، إطار مزدوج، وخط قرآني بسطر أوسع. */
 .mushaf {
+  position: relative;
   font-family: var(--font-quran);
-  line-height: 2;
+  line-height: 2.2;
   text-align: justify;
   text-align-last: center;
-  color: var(--text);
-  padding: 8px 2px 24px;
+  color: var(--mushaf-ink);
+  background: var(--mushaf-paper);
+  background-image: radial-gradient(
+    circle at 20% 10%,
+    color-mix(in srgb, var(--mushaf-rule) 7%, transparent),
+    transparent 55%
+  );
+  border: 1px solid color-mix(in srgb, var(--mushaf-rule) 55%, var(--border));
+  outline: 3px double color-mix(in srgb, var(--mushaf-rule) 42%, transparent);
+  outline-offset: -6px;
+  border-radius: 4px;
+  box-shadow: 0 2px 14px rgba(22, 33, 28, 0.07);
+  padding: 22px 18px 26px;
+}
+
+.mushaf-page-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--mushaf-rule) 35%, transparent);
+  font-family: var(--font-sans);
+}
+
+.mushaf-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(280px, 100%);
+}
+
+.mushaf-page-title h2 {
+  font-family: var(--font-quran);
+  font-size: 25px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--mushaf-rule);
+}
+
+.mushaf-rule {
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--mushaf-rule) 55%, transparent);
+}
+
+.mushaf-page-head small {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .bismillah {
   text-align: center;
-  font-size: 0.78em;
-  color: var(--text-muted);
-  margin-bottom: 0.8em;
+  font-size: 0.86em;
+  color: var(--mushaf-ink);
+  margin: 2px 0 0.8em;
 }
 
 .ayah {
@@ -1196,15 +1331,16 @@ h1 {
   display: inline-grid;
   place-items: center;
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   line-height: 1;
-  width: 1.7em;
-  height: 1.7em;
-  margin: 0 0.28em;
-  border: 1px solid var(--gold);
+  width: 1.85em;
+  height: 1.85em;
+  margin: 0 0.18em;
+  border: 1.5px solid var(--mushaf-rule);
   border-radius: 50%;
-  color: var(--gold);
+  background: var(--mushaf-paper);
+  color: var(--mushaf-rule);
   vertical-align: middle;
   unicode-bidi: isolate;
 }
@@ -1215,9 +1351,9 @@ h1 {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 10px 2px 4px;
-  border-top: 1px solid var(--border);
-  margin-top: 8px;
+  padding: 10px 4px 4px;
+  border-top: 1px solid color-mix(in srgb, var(--mushaf-rule) 35%, transparent);
+  margin-top: 10px;
 }
 
 /* words */
@@ -1312,6 +1448,16 @@ h1 {
 .word.is-hidden.history-red {
   background: var(--surface-2);
   border-bottom: 2px solid transparent;
+}
+
+/* المخفي داخل المصحف يأخذ لون الورق نفسه حتى لا يبدو كبطاقة إعدادات. */
+.mushaf .word.is-hidden,
+.mushaf .word.is-hidden.history-green,
+.mushaf .word.is-hidden.history-yellow,
+.mushaf .word.is-hidden.history-orange,
+.mushaf .word.is-hidden.history-red {
+  background: color-mix(in srgb, var(--mushaf-paper) 84%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mushaf-rule) 32%, transparent);
 }
 
 /* reader bottom bar */
@@ -2176,11 +2322,15 @@ input[type='range'] {
   .surah-progress {
     display: none;
   }
-  .streak-days {
-    display: none;
+  .home-hero-actions {
+    grid-template-columns: 1fr;
   }
-  .goal-card .btn {
-    width: 100%;
+  .home-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+  .home-stat {
+    justify-content: flex-start;
   }
   .onboarding-step h1 {
     font-size: 24px;
@@ -3378,6 +3528,15 @@ input[type='range'] {
   color: var(--text-muted);
   font-size: 11.5px !important;
   line-height: 1.75;
+}
+
+.chat-msg.is-no-answer {
+  border-color: color-mix(in srgb, var(--gold) 42%, var(--border));
+  background: color-mix(in srgb, var(--warning-soft) 32%, var(--surface));
+}
+
+.chat-msg.is-no-answer .chat-greeting {
+  color: var(--warning);
 }
 
 .chat-foot-actions,

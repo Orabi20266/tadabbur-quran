@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeSplitParticles, biasPlan } from './useSpeech';
+import { mergeSplitParticles, biasPlan, nextTokens } from './useSpeech';
 
 describe('recogniser transcript cleanup', () => {
   it('joins a particle the engine split off the next word', () => {
@@ -21,6 +21,27 @@ describe('recogniser transcript cleanup', () => {
       'الله',
     ]);
     expect(mergeSplitParticles([])).toEqual([]);
+  });
+});
+
+describe('shared transcript cursor (web + native)', () => {
+  it('holds the last interim word until the engine settles', () => {
+    const first = nextTokens('قل هو الله', true, 0);
+    expect(first?.end).toBe(2);
+    expect(first?.tokens).toEqual(['قل', 'هو']);
+
+    const settled = nextTokens('قل هو الله', false, 2);
+    expect(settled?.end).toBe(3);
+    expect(settled?.tokens).toEqual(['الله']);
+  });
+
+  it('holds a trailing particle so it can join the next word', () => {
+    expect(nextTokens('قل و', true, 0)).toEqual({ end: 1, tokens: ['قل'] });
+    expect(nextTokens('قل و الله', false, 1)?.tokens).toEqual(['والله']);
+  });
+
+  it('moves the cursor back when the engine revises a transcript down', () => {
+    expect(nextTokens('قل هو', false, 3)).toEqual({ end: 2, tokens: [] });
   });
 });
 

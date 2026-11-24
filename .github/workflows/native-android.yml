@@ -1,0 +1,100 @@
+name: Native Android
+
+on:
+  push:
+    branches: [mobile/capacitor]
+    tags: ['v*']
+  pull_request:
+    branches: [mobile/capacitor]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HAS_ANDROID_KEYS: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+  ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Make Gradle executable
+        run: chmod +x android/gradlew
+
+      - name: Fail when a release tag has no signing secrets
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.HAS_ANDROID_KEYS != 'true' }}
+        run: echo "::error::ANDROID_KEYSTORE_BASE64 and the Android signing secrets are required for a v* tag." && exit 1
+
+      - name: Build unsigned debug APK
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: cd android && ./gradlew assembleDebug
+
+      - name: Upload debug APK
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tadabbur-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Decode release keystore
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.HAS_ANDROID_KEYS == 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/tadabbur.jks"
+
+      - name: Build signed release AAB
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.HAS_ANDROID_KEYS == 'true' }}
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_TYPE: ${{ secrets.ANDROID_KEYSTORE_TYPE || 'JKS' }}
+        run: |
+          cd android
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/signing/tadabbur.jks" \
+            -Pandroid.injected.signing.store.type="$ANDROID_KEYSTORE_TYPE" \
+            -Pandroid.injected.signing.store.password="$ANDROID_STORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+
+      - name: Upload release AAB
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.HAS_ANDROID_KEYS == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tadabbur-android-release
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error

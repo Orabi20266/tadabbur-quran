@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">تدبّر</string>
+    <string name="title_activity_main">تدبّر</string>
+    <string name="package_name">com.orabi20266.tadabbur</string>
+    <string name="custom_url_scheme">com.orabi20266.tadabbur</string>
+</resources>

@@ -33,7 +33,7 @@ import { updateSettings, useApp } from '../lib/store';
 import type { DetectorWord, EventType, SpeechEngine, WordStatus } from '../lib/types';
 import { TranscriptTracker } from '../lib/tracker';
 import type { TrackerMeta } from '../lib/tracker';
-import { useSpeech } from '../lib/useSpeech';
+import { usePlatformSpeech } from '../lib/usePlatformSpeech';
 import { Sheet } from '../components/Sheet';
 import { WordSpan } from '../components/WordSpan';
 
@@ -138,7 +138,7 @@ export function HadithPage() {
     tracker.feed(tokens);
   }, []);
 
-  const speech = useSpeech(handleTokens, 'ar-SA', {
+  const speech = usePlatformSpeech(handleTokens, 'ar-SA', {
     phrases: () => trackerRef.current?.biasPhrases(8) ?? [],
   });
   speechRef.current = { start: speech.start, stop: speech.stop };

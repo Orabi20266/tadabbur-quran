@@ -5,8 +5,11 @@ import './styles/fonts.css';
 import './styles/tokens.css';
 import './styles/app.css';
 import { registerSW } from 'virtual:pwa-register';
+import { Capacitor } from '@capacitor/core';
 
-if (import.meta.env.PROD) {
+// The native bundle is shipped inside the store binary. A service worker
+// would only serve stale assets there, so registration stays web-only.
+if (import.meta.env.PROD && !Capacitor.isNativePlatform()) {
   registerSW({ immediate: true });
 
   // Deployments must reach readers who keep the app open for a whole session.

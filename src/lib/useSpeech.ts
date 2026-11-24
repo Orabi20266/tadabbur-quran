@@ -138,6 +138,36 @@ export function mergeSplitParticles(tokens: string[]): string[] {
   return out;
 }
 
+export interface TokenStep {
+  /** New cursor position. May move backwards when the engine revises down. */
+  end: number;
+  /** Fresh words to feed to the tracker; empty when nothing is stable yet. */
+  tokens: string[];
+}
+
+/**
+ * Shared by the browser recogniser and the native Capacitor adapter, so the
+ * replay guard, interim-tail hold and particle merge behave identically.
+ */
+export function nextTokens(
+  transcript: string,
+  hasInterim: boolean,
+  consumed: number,
+): TokenStep | null {
+  const tokens = splitTranscript(transcript);
+  // A shorter revised transcript moves the mark down instead of replaying old
+  // words the reader has not said again.
+  if (tokens.length < consumed) return { end: tokens.length, tokens: [] };
+  // The last interim token may still change; wait for more context/final.
+  const stable = hasInterim ? Math.max(0, tokens.length - 1) : tokens.length;
+  // A bare «و» at the end may be the first half of «والله»; hold it until the
+  // next token arrives instead of feeding it as a one-letter word.
+  let end = stable;
+  while (end > consumed && JOINING_PARTICLE.has(tokens[end - 1])) end -= 1;
+  if (end <= consumed) return null;
+  return { end, tokens: mergeSplitParticles(tokens.slice(consumed, end)) };
+}
+
 function recognizerCtor(): RecognizerCtor | null {
   if (typeof window === 'undefined') return null;
   const w = window as unknown as {
@@ -233,27 +263,10 @@ export function useSpeech(
         setHeard(transcript);
       }
 
-      const tokens = splitTranscript(transcript);
-      // Never replay tokens from an older/shorter results list: replaying would
-      // move the cursor over words the reader has not repeated. If the engine
-      // revises a transcript down, move the mark down with it instead of
-      // blocking every later token.
-      if (tokens.length < consumedRef.current) {
-        consumedRef.current = tokens.length;
-        return;
-      }
-      const consumed = consumedRef.current;
-      // The last interim token may still change; wait for more context/final.
-      const stable = hasInterim ? Math.max(0, tokens.length - 1) : tokens.length;
-      // A bare «و» at the end may be the first half of «والله»; hold it until
-      // the next token arrives instead of feeding it as a one-letter word.
-      let end = stable;
-      while (end > consumed && JOINING_PARTICLE.has(tokens[end - 1])) end -= 1;
-      if (end > consumed) {
-        const fresh = mergeSplitParticles(tokens.slice(consumed, end));
-        consumedRef.current = end;
-        if (fresh.length) onTokensRef.current(fresh);
-      }
+      const step = nextTokens(transcript, hasInterim, consumedRef.current);
+      if (!step) return;
+      consumedRef.current = step.end;
+      if (step.tokens.length) onTokensRef.current(step.tokens);
     };
 
     rec.onerror = (event) => {

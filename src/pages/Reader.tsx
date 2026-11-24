@@ -52,7 +52,7 @@ import { TranscriptTracker } from '../lib/tracker';
 import type { TrackerMeta } from '../lib/tracker';
 import { playMistakeSound, primeMistakeSound } from '../lib/sound';
 import { muqattaahAt, spokenHint } from '../lib/muqattaat';
-import { useSpeech } from '../lib/useSpeech';
+import { usePlatformSpeech } from '../lib/usePlatformSpeech';
 import { Sheet } from '../components/Sheet';
 import { WordSpan } from '../components/WordSpan';
 import { WordHistoryPanel } from '../components/WordHistoryPanel';
@@ -142,7 +142,7 @@ export function Reader() {
     biasing: speechBiasing,
     start: startSpeech,
     stop: stopSpeech,
-  } = useSpeech(handleTokens, 'ar-SA', {
+  } = usePlatformSpeech(handleTokens, 'ar-SA', {
     // The reader's position decides which words steer the engine; nothing here
     // can reveal or advance a word on its own.
     phrases: () => trackerRef.current?.biasPhrases(8) ?? [],

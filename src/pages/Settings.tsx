@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   Download,
   Info,
@@ -31,6 +32,7 @@ const themes: { id: Theme; label: string; icon: typeof Sun }[] = [
 
 export function Settings() {
   const settings = useApp((s) => s.settings);
+  const nativeApp = Capacitor.isNativePlatform();
   const [msg, setMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const speechBiasing =
@@ -280,22 +282,26 @@ export function Settings() {
           CC-BY-4.0. الخطوط: Amiri Quran و IBM Plex Sans Arabic بترخيص OFL.
         </p>
         <p className="muted small">
-          التعرّف الصوتي يتم عبر محرّك متصفحك، ومطابقة الكلمات مع نص المصحف تجري
-          محلياً داخل التطبيق. المرحلة التالية تستبدله بمحرّك مفتوح المصدر مستضاف
-          ذاتياً عبر WebSocket.
+          {nativeApp
+            ? 'التعرّف الصوتي يتم عبر محرّك النظام، ومطابقة الكلمات مع نص المصحف تجري محلياً داخل التطبيق.'
+            : 'التعرّف الصوتي يتم عبر محرّك متصفحك، ومطابقة الكلمات مع نص المصحف تجري محلياً داخل التطبيق. المرحلة التالية تستبدله بمحرّك مفتوح المصدر مستضاف ذاتياً عبر WebSocket.'}
         </p>
         <p className="muted small">
           الإصدار 0.1.0 · بناء <span className="mono">{__BUILD_ID__}</span>
         </p>
-        <div className="row wrap">
-          <button className="btn btn-secondary" onClick={() => void refreshApp()}>
-            <RefreshCw size={17} aria-hidden /> تحميل آخر نسخة
-          </button>
-        </div>
-        <p className="muted small">
-          إن بدا أن الرابط يعرض سلوكًا قديمًا، فهذا الزر يزيل نسخة الخدمة
-          المخزّنة ويعيد التحميل من الشبكة. لا يمسّ سجلك.
-        </p>
+        {nativeApp ? null : (
+          <>
+            <div className="row wrap">
+              <button className="btn btn-secondary" onClick={() => void refreshApp()}>
+                <RefreshCw size={17} aria-hidden /> تحميل آخر نسخة
+              </button>
+            </div>
+            <p className="muted small">
+              إن بدا أن الرابط يعرض سلوكًا قديمًا، فهذا الزر يزيل نسخة الخدمة
+              المخزّنة ويعيد التحميل من الشبكة. لا يمسّ سجلك.
+            </p>
+          </>
+        )}
       </section>
     </div>
   );

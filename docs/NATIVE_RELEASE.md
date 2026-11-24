@@ -22,7 +22,8 @@ npx cap sync android   # أو: npx cap sync ios
 ## ما يفعله CI
 
 - على كل push/PR إلى `mobile/capacitor`: اختبارات + بناء ويب + APK للتصحيح + تحقق من بناء iOS للمحاكي.
-- على وسم `v*` (مثال `v1.0.0`) مع أسرار التوقيع: AAB موقّع لـ Google Play وIPA موقّع لـ App Store كأدوات (artifacts).
+- على وسم `v*` (مثال `v1.0.1`) مع أسرار التوقيع: AAB موقّع لـ Google Play وIPA موقّع لـ App Store كأدوات (artifacts).
+- إذا لم تكن أسرار التوقيع مهيأة، يبقى الوسم ناجحاً لكنه يُنتج APK معاينة غير موقّع ولا يُنتج IPA؛ يُستخدم للاختبار الشخصي عبر GitHub Releases فقط.
 
 ## الأسرار المطلوبة في GitHub Actions
 
@@ -67,5 +68,5 @@ base64 -i tadabbur.jks | tr -d '\n'
 - جرّب التعرّف الصوتي على جهاز حقيقي بـ `ar-SA` مع إذن الميكروفون.
 - جرّب الإملاء اليدوي كبديل كامل عند رفض الإذن.
 - أكّد سلوك الحروف المقطّعة مع صوت حقيقي؛ هذه المسألة **لم تُحل بعد** ولا يجوز الإعلان عنها كميزة مكتملة.
-- حدّث `MARKETING_VERSION` في `ios/App/App.xcodeproj/project.pbxproj` و`versionName`/`versionCode` في `android/app/build.gradle`.
+- حدّث `APP_VERSION` في `src/lib/version.ts` و`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` في `ios/App/App.xcodeproj/project.pbxproj` و`versionName`/`versionCode` في `android/app/build.gradle` معاً، وإلا لن يطابق تنبيه التحديث رقم الإصدار المثبّت.
 - ارفع لقطات شاشة بالأبعاد المطلوبة؛ القائمة في `store/README.md`.

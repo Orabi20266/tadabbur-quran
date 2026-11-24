@@ -5,6 +5,7 @@ import {
   CheckCheck,
   ChevronDown,
   Copy,
+  Download,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -20,6 +21,12 @@ import {
   DorarError,
 } from '../lib/dorar';
 import type { DorarAnswer, DorarHadith, DorarItem } from '../lib/dorar';
+import {
+  getCachedAnswer,
+  offlineAnswers,
+  saveCachedAnswer,
+} from '../lib/dorarOffline';
+import type { CachedDorar } from '../lib/dorarOffline';
 import {
   countLine,
   DISCLAIMER,
@@ -50,6 +57,8 @@ interface Turn {
   at: number;
   status: TurnStatus;
   answer?: DorarAnswer;
+  /** الإجابة جاءت من التخزين المحلي لا من الشبكة. */
+  cached?: boolean;
   error?: string;
 }
 
@@ -117,8 +126,11 @@ function normalizeAnswer(answer: unknown): DorarAnswer | undefined {
     hadiths?: DorarHadith[];
     total?: number;
     moreUrl?: string;
+    cached?: boolean;
   };
-  if (Array.isArray(record.sources)) return record as DorarAnswer;
+  if (Array.isArray(record.sources)) {
+    return { ...record, cached: record.cached === true } as DorarAnswer;
+  }
   if (!Array.isArray(record.hadiths)) return undefined;
   const total = typeof record.total === 'number' ? record.total : record.hadiths.length;
   const moreUrl = record.moreUrl ?? dorarSearchUrl(record.query ?? '');
@@ -164,6 +176,7 @@ function loadTurns(): Turn[] {
           at: typeof turn.at === 'number' ? turn.at : Date.now(),
           status: turn.status,
           answer,
+          cached: turn.cached === true,
           error: turn.error,
         };
       })
@@ -311,6 +324,7 @@ function ExcerptCard({
 
 export function Ask() {
   const [turns, setTurns] = useState<Turn[]>(loadTurns);
+  const [saved, setSaved] = useState<CachedDorar[]>(offlineAnswers);
   const [input, setInput] = useState('');
   const [openTurns, setOpenTurns] = useState<Set<string>>(new Set());
   const [openItems, setOpenItems] = useState<Set<string>>(new Set());
@@ -361,15 +375,40 @@ export function Ask() {
         answer = await askDorar(question, undefined, controller.signal);
       }
       if (!mountedRef.current) return;
+      saveCachedAnswer(question, answer);
+      setSaved(offlineAnswers());
       setTurns((prev) =>
         prev.map((turn) =>
           turn.id === id
-            ? { ...turn, status: 'ready', answer, error: undefined }
+            ? {
+                ...turn,
+                status: 'ready',
+                answer,
+                cached: false,
+                error: undefined,
+              }
             : turn,
         ),
       );
     } catch (error) {
       if (!mountedRef.current) return;
+      const cached = getCachedAnswer(question);
+      if (cached) {
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === id
+              ? {
+                  ...turn,
+                  status: 'ready',
+                  answer: cached,
+                  cached: true,
+                  error: undefined,
+                }
+              : turn,
+          ),
+        );
+        return;
+      }
       const code =
         (error as Error).name === 'AbortError'
           ? 'timeout'
@@ -417,6 +456,29 @@ export function Ask() {
       void run(turn.id, turn.question);
     },
     [busy, run],
+  );
+
+  const openCached = useCallback(
+    (entry: CachedDorar) => {
+      if (busy) return;
+      const id = newId();
+      setInput('');
+      setTurns((prev) =>
+        [
+          ...prev,
+          {
+            id,
+            question: entry.query,
+            at: Date.now(),
+            status: 'ready' as const,
+            answer: entry.answer,
+            cached: true,
+          },
+        ].slice(-MAX_STORED),
+      );
+      inputRef.current?.focus();
+    },
+    [busy],
   );
 
   const clear = useCallback(() => {
@@ -499,6 +561,30 @@ export function Ask() {
         <p className="chat-day" aria-hidden>
           اليوم
         </p>
+        {saved.length ? (
+          <div className="chat-offline-bar">
+            <span className="chat-offline-title">
+              <Download size={14} aria-hidden /> محفوظ للقراءة دون إنترنت
+            </span>
+            <span className="chat-offline-chips">
+              {saved.slice(0, 6).map((entry) => (
+                <button
+                  key={entry.query}
+                  className="chat-offline-chip"
+                  type="button"
+                  onClick={() => openCached(entry)}
+                  disabled={busy}
+                  title={entry.query}
+                >
+                  {entry.query}
+                </button>
+              ))}
+            </span>
+            <span className="chat-offline-note">
+              {arabicNumber(saved.length)} إجابة
+            </span>
+          </div>
+        ) : null}
         <p className="chat-notice">
           النتائج من موسوعات الدرر السنية، ويُقدَّم الصحيح والحسن.
         </p>
@@ -593,6 +679,11 @@ export function Ask() {
                   <div className="chat-msg is-in">
                     <p className="chat-greeting">{openingFor(seed)}</p>
                     <p>{countLine(answer.query, total)}</p>
+                    {turn.cached ? (
+                      <p className="chat-note">
+                        من المحفوظات على جهازك — قد لا تكون هذه أحدث نتيجة.
+                      </p>
+                    ) : null}
                     {!collected?.hadiths.length && collected?.skippedWeak ? (
                       <p className="chat-warning">{NO_AUTHENTIC}</p>
                     ) : null}

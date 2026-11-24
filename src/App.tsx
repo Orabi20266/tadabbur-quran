@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { UpdateBanner } from './components/UpdateBanner';
 import { Dashboard } from './pages/Dashboard';
 import { Reader } from './pages/Reader';
 import { Tracker } from './pages/Tracker';
@@ -35,12 +36,13 @@ function Shell() {
   const onboarded = useApp((s) => s.onboarded);
   const { pathname } = useLocation();
 
-  if (!onboarded && pathname !== '/onboarding') {
-    return <Navigate to="/onboarding" replace />;
-  }
-
   return (
-    <Routes>
+    <>
+      <UpdateBanner />
+      {!onboarded && pathname !== '/onboarding' ? (
+        <Navigate to="/onboarding" replace />
+      ) : (
+        <Routes>
       <Route path="/onboarding" element={<Onboarding />} />
       <Route path="/read/:surah" element={<Reader />} />
       <Route
@@ -115,8 +117,10 @@ function Shell() {
           </Layout>
         }
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      )}
+    </>
   );
 }
 

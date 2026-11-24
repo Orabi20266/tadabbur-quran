@@ -10,9 +10,11 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Sun,
+  Trash2,
   Upload,
   MonitorSmartphone,
   RefreshCw,
+  WifiOff,
 } from 'lucide-react';
 import {
   exportState,
@@ -22,6 +24,14 @@ import {
   useApp,
 } from '../lib/store';
 import type { Theme } from '../lib/types';
+import { arabicNumber } from '../lib/quran';
+import { APP_VERSION } from '../lib/version';
+import { checkForUpdate } from '../lib/update';
+import {
+  clearOfflineAnswers,
+  downloadOfflinePack,
+  offlineCount,
+} from '../lib/dorarOffline';
 import { ToggleRow } from '../components/ToggleRow';
 
 const themes: { id: Theme; label: string; icon: typeof Sun }[] = [
@@ -34,6 +44,10 @@ export function Settings() {
   const settings = useApp((s) => s.settings);
   const nativeApp = Capacitor.isNativePlatform();
   const [msg, setMsg] = useState<string | null>(null);
+  const [offlineTotal, setOfflineTotal] = useState(offlineCount);
+  const [packStatus, setPackStatus] = useState<string | null>(null);
+  const [packBusy, setPackBusy] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const speechBiasing =
     typeof window !== 'undefined' &&
@@ -66,6 +80,56 @@ export function Settings() {
     if (!window.confirm('سيُحذف كل سجلك وعلامات حفظك على هذا الجهاز. متابعة؟')) return;
     resetAll();
     notify('أُعيد ضبط البيانات.');
+  };
+
+  const downloadPack = async () => {
+    if (!navigator.onLine) {
+      notify('لا يوجد اتصال الآن. جرّب بعد العودة إلى الإنترنت.');
+      return;
+    }
+    setPackBusy(true);
+    setPackStatus('جارٍ تجهيز الحزمة…');
+    try {
+      const result = await downloadOfflinePack((done, total, label) => {
+        setPackStatus(`جارٍ تنزيل ${label} (${arabicNumber(done)}/${arabicNumber(total)})`);
+      });
+      setOfflineTotal(offlineCount());
+      if (result.failed.length) {
+        setPackStatus(
+          `اكتمل جزئياً: ${arabicNumber(result.ok)} جديد، ${arabicNumber(result.failed.length)} تعذّر؛ أعد المحاولة لاحقاً.`,
+        );
+        notify('بعض الأحاديث لم تُحمَّل؛ أعد المحاولة عند توفر الاتصال.');
+      } else {
+        setPackStatus(
+          `الحزمة جاهزة: ${arabicNumber(result.ok)} جديد، ${arabicNumber(result.skipped)} كان محفوظاً.`,
+        );
+        notify('أُضيفت الحزمة للقراءة دون إنترنت.');
+      }
+    } catch {
+      setPackStatus('تعذّر تنزيل الحزمة. تحقق من الاتصال ثم أعد المحاولة.');
+    } finally {
+      setPackBusy(false);
+    }
+  };
+
+  const clearOffline = () => {
+    if (!window.confirm('سيُحذف ما حفظته من نتائج الدرر على هذا الجهاز. متابعة؟')) return;
+    clearOfflineAnswers();
+    setOfflineTotal(0);
+    setPackStatus(null);
+    notify('حُذفت الإجابات المحفوظة.');
+  };
+
+  const checkUpdate = async () => {
+    setUpdateBusy(true);
+    try {
+      const info = await checkForUpdate(true);
+      notify(info ? `توجد نسخة جديدة: ${info.version}` : 'أنت على آخر نسخة متاحة.');
+    } catch {
+      notify('تعذّر التحقق من التحديث الآن.');
+    } finally {
+      setUpdateBusy(false);
+    }
   };
 
   /** Drop the service worker and its cache, then load the published bundle. */
@@ -268,6 +332,39 @@ export function Settings() {
         />
       </section>
 
+      <section className="card settings-card">
+        <h2 className="section-title">
+          <WifiOff size={17} aria-hidden /> القراءة دون إنترنت
+        </h2>
+        <p className="muted small">
+          تُحفظ إجابات الدرر التي تفتحها أثناء الاتصال تلقائياً على جهازك، فتُعرض
+          عند انقطاع الشبكة. يمكنك أيضاً تنزيل حزمة مختارة من الأحاديث مرة واحدة.
+        </p>
+        <p className="muted small">
+          المحفوظ حالياً: {arabicNumber(offlineTotal)} إجابة.
+        </p>
+        <div className="row wrap">
+          <button
+            className="btn btn-secondary"
+            onClick={() => void downloadPack()}
+            disabled={packBusy}
+          >
+            <Download size={17} aria-hidden />
+            {packBusy ? 'جارٍ التنزيل…' : 'تنزيل حزمة أحاديث'}
+          </button>
+          {offlineTotal > 0 ? (
+            <button className="btn btn-danger" onClick={clearOffline} disabled={packBusy}>
+              <Trash2 size={17} aria-hidden /> مسح المحفوظات
+            </button>
+          ) : null}
+        </div>
+        {packStatus ? <p className="offline-status muted">{packStatus}</p> : null}
+        <p className="muted small">
+          تظهر الإجابات المحفوظة في أعلى صفحة «المحادثة»، ويمكن فتحها مباشرة دون
+          بحث جديد.
+        </p>
+      </section>
+
       <section className="card settings-card about-card">
         <h2 className="section-title">
           <Info size={17} aria-hidden /> حول التطبيق
@@ -287,8 +384,20 @@ export function Settings() {
             : 'التعرّف الصوتي يتم عبر محرّك متصفحك، ومطابقة الكلمات مع نص المصحف تجري محلياً داخل التطبيق. المرحلة التالية تستبدله بمحرّك مفتوح المصدر مستضاف ذاتياً عبر WebSocket.'}
         </p>
         <p className="muted small">
-          الإصدار 0.1.0 · بناء <span className="mono">{__BUILD_ID__}</span>
+          الإصدار {APP_VERSION} · بناء <span className="mono">{__BUILD_ID__}</span>
         </p>
+        {nativeApp ? (
+          <div className="row wrap">
+            <button
+              className="btn btn-secondary"
+              onClick={() => void checkUpdate()}
+              disabled={updateBusy}
+            >
+              <RefreshCw size={17} aria-hidden />
+              {updateBusy ? 'جارٍ البحث…' : 'التحقق من تحديث'}
+            </button>
+          </div>
+        ) : null}
         {nativeApp ? null : (
           <>
             <div className="row wrap">

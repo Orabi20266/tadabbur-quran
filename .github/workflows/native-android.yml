@@ -53,16 +53,16 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x android/gradlew
 
-      - name: Fail when a release tag has no signing secrets
+      - name: Warn when a release tag has no signing secrets
         if: ${{ startsWith(github.ref, 'refs/tags/v') && env.HAS_ANDROID_KEYS != 'true' }}
-        run: echo "::error::ANDROID_KEYSTORE_BASE64 and the Android signing secrets are required for a v* tag." && exit 1
+        run: echo "::warning::Android signing secrets are not configured. This tag will publish an unsigned preview APK, not a Play release."
 
       - name: Build unsigned debug APK
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') || env.HAS_ANDROID_KEYS != 'true' }}
         run: cd android && ./gradlew assembleDebug
 
       - name: Upload debug APK
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') || env.HAS_ANDROID_KEYS != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: tadabbur-android-debug

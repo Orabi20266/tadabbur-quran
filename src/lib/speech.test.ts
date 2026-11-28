@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeSplitParticles, biasPlan } from './useSpeech';
+import { mergeSplitParticles, biasPlan, nextTokens } from './useSpeech';
 
 describe('recogniser transcript cleanup', () => {
   it('joins a particle the engine split off the next word', () => {
@@ -14,6 +14,12 @@ describe('recogniser transcript cleanup', () => {
     ]);
   });
 
+  it('joins a particle even when the engine returns harakat', () => {
+    expect(mergeSplitParticles(['وَ', 'الله'])).toEqual(['وَالله']);
+    expect(nextTokens('قُلْ وَ', true, 0)?.tokens).toEqual(['قُلْ']);
+    expect(nextTokens('قُلْ وَ الله', false, 1)?.tokens).toEqual(['وَالله']);
+  });
+
   it('leaves ordinary tokens alone', () => {
     expect(mergeSplitParticles(['قل', 'هو', 'الله'])).toEqual([
       'قل',
@@ -21,6 +27,32 @@ describe('recogniser transcript cleanup', () => {
       'الله',
     ]);
     expect(mergeSplitParticles([])).toEqual([]);
+  });
+});
+
+describe('shared transcript cursor (web + native)', () => {
+  it('holds the last interim word until the engine settles', () => {
+    const first = nextTokens('قل هو الله', true, 0);
+    expect(first?.end).toBe(2);
+    expect(first?.tokens).toEqual(['قل', 'هو']);
+
+    const settled = nextTokens('قل هو الله', false, 2);
+    expect(settled?.end).toBe(3);
+    expect(settled?.tokens).toEqual(['الله']);
+  });
+
+  it('holds a trailing particle so it can join the next word', () => {
+    expect(nextTokens('قل و', true, 0)).toEqual({ end: 1, tokens: ['قل'] });
+    expect(nextTokens('قل و الله', false, 1)?.tokens).toEqual(['والله']);
+  });
+
+  it('never rewinds on an empty or shorter revised result', () => {
+    expect(nextTokens('', false, 3)).toBeNull();
+    expect(nextTokens('   ', true, 3)).toBeNull();
+    // Earlier words were already emitted; waiting avoids replaying them as
+    // false mistakes when the engine clears or revises its results list.
+    expect(nextTokens('قل هو', false, 2)).toBeNull();
+    expect(nextTokens('قل هو الله', false, 2)?.tokens).toEqual(['الله']);
   });
 });
 

@@ -1,0 +1,11 @@
+{
+  "name": "tadabbur-islamqa-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "وسيط قراءة بين تطبيق تدبّر وموقع IslamQA",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}

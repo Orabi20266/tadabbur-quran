@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   countLine,
   DISCLAIMER,
+  DORAR_DISCLAIMER,
+  dorarCountLine,
   missingFor,
   NO_ANSWER,
   NO_AUTHENTIC,
@@ -62,12 +64,22 @@ describe('chatLines', () => {
 
   it('writes one plain count line per answer', () => {
     expect(countLine('حكم الغيبة', 3)).toBe(
-      'وجدت ٣ نتائج عن «حكم الغيبة» في الدرر السنية.',
+      'وجدت ٣ نتائج عن «حكم الغيبة» في موقع الإسلام سؤال وجواب.',
     );
     expect(countLine('حكم الغيبة', 1)).toBe(
-      'وجدت نتيجة واحدة عن «حكم الغيبة» في الدرر السنية.',
+      'وجدت نتيجة واحدة عن «حكم الغيبة» في موقع الإسلام سؤال وجواب.',
     );
-    expect(countLine('', 2)).toBe('وجدت نتيجتين في الدرر السنية.');
-    expect(countLine('ا'.repeat(60), 3)).toBe('وجدت ٣ نتائج في الدرر السنية.');
+    expect(countLine('', 2)).toBe('وجدت نتيجتين في موقع الإسلام سؤال وجواب.');
+    expect(countLine('ا'.repeat(60), 3)).toBe(
+      'وجدت ٣ نتائج في موقع الإسلام سؤال وجواب.',
+    );
+  });
+
+  it('keeps saved Dorar answers labelled as saved, not as a new search', () => {
+    expect(dorarCountLine('حكم الغيبة', 2)).toBe(
+      'وجدت نتيجتين عن «حكم الغيبة» في الدرر السنية.',
+    );
+    expect(DORAR_DISCLAIMER).toMatch(/الدرر السنية/);
+    expect(DORAR_DISCLAIMER).not.toMatch(/الإسلام سؤال وجواب|IslamQA/);
   });
 });

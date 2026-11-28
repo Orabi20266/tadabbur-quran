@@ -32,7 +32,11 @@ import { playMistakeSound, primeMistakeSound } from '../lib/sound';
 import { updateSettings, useApp } from '../lib/store';
 import type { DetectorWord, EventType, SpeechEngine, WordStatus } from '../lib/types';
 import { TranscriptTracker } from '../lib/tracker';
-import type { TrackerMeta } from '../lib/tracker';
+import type {
+  ConfirmationChoice,
+  ConfirmationRequest,
+  TrackerMeta,
+} from '../lib/tracker';
 import { useSpeech } from '../lib/useSpeech';
 import { Sheet } from '../components/Sheet';
 import { WordSpan } from '../components/WordSpan';
@@ -103,6 +107,8 @@ export function HadithPage() {
   const [statuses, setStatuses] = useState<Record<string, WordStatus>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [cursor, setCursor] = useState(0);
+  /** Misheard word awaiting confirmation; it is not a recorded mistake yet. */
+  const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [mistakes, setMistakes] = useState<ReciteMistake[]>([]);
   const [hidden, setHidden] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -202,6 +208,7 @@ export function HadithPage() {
       setStatuses({});
       setRevealed({});
       setMistakes([]);
+      setConfirmation(null);
       setCursor(0);
       setHidden(true);
       setPaused(false);
@@ -240,6 +247,7 @@ export function HadithPage() {
     setPhase('summary');
     speechRef.current.stop();
     trackerRef.current = null;
+    setConfirmation(null);
   }, [persistProgress, phase]);
 
   finishRef.current = finishSession;
@@ -294,6 +302,9 @@ export function HadithPage() {
       dontProgressUntilFixed: false,
       detectPreamble: false,
       detectMuqattaat: false,
+      // A word the browser misheard is never recorded without confirmation.
+      confirmMistakes: true,
+      onConfirmation: setConfirmation,
       onEvent: (word, type, meta) => eventRef.current(word, type, meta),
       onBlocked: () => {},
       onDone: () => finishRef.current(),
@@ -326,6 +337,12 @@ export function HadithPage() {
       speechRef.current.stop();
     };
   }, [persistProgress, phase, session?.hadith.id, session?.mode]);
+
+  // The tracker drops tokens while a confirmation is open. Stop the mic so no
+  // words are lost; the confirmation button restarts it on a user gesture.
+  useEffect(() => {
+    if (confirmation) speechRef.current.stop();
+  }, [confirmation]);
 
   const toggleSaved = (id: string) => {
     setStored((prev) => ({
@@ -373,6 +390,12 @@ export function HadithPage() {
   };
 
   const stepWord = () => trackerRef.current?.step();
+  const resolveConfirmation = useCallback((choice: ConfirmationChoice) => {
+    trackerRef.current?.resolveConfirmation(choice);
+    if (engineRef.current === 'browser' && phase === 'live' && !pausedRef.current) {
+      speechRef.current.start();
+    }
+  }, [phase]);
   const manualMode = engineRef.current === 'manual';
   const micOff = !manualMode && ['denied', 'unsupported', 'error'].includes(speech.status);
 
@@ -489,6 +512,39 @@ export function HadithPage() {
                     تتبّع يدوي
                   </button>
                 </span>
+              </div>
+            ) : null}
+
+            {confirmation ? (
+              <div className="confirm-banner" role="alertdialog" aria-live="assertive">
+                <span>
+                  سمعنا «{confirmation.heard || 'كلمة غير واضحة'}» عند كلمة «
+                  {wordByKeyRef.current[confirmation.word.key]?.text ?? ''
+                  }». هل قرأتها خطأ؟
+                </span>
+                <div className="banner-actions">
+                  <button
+                    className="chip-btn"
+                    type="button"
+                    onClick={() => resolveConfirmation('correct')}
+                  >
+                    قرأتها صحيحة
+                  </button>
+                  <button
+                    className="chip-btn is-danger"
+                    type="button"
+                    onClick={() => resolveConfirmation('wrong')}
+                  >
+                    خطأ
+                  </button>
+                  <button
+                    className="chip-btn"
+                    type="button"
+                    onClick={() => resolveConfirmation('skip')}
+                  >
+                    تخطّي
+                  </button>
+                </div>
               </div>
             ) : null}
 

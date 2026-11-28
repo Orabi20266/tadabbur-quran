@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeArabic, wordsForRange, wordsOf } from './quran';
 import { TranscriptTracker } from './tracker';
-import type { TrackerMeta } from './tracker';
+import type { ConfirmationRequest, TrackerMeta } from './tracker';
 import type { DetectorWord, EventType } from './types';
 
 interface Event {
@@ -16,6 +16,7 @@ function makeTracker(
     dontProgressUntilFixed?: boolean;
     detectMistakes?: boolean;
     detectTashkeel?: boolean;
+    confirmMistakes?: boolean;
   } = {},
 ) {
   const words = patch.words ?? wordsForRange(112, 1, 4);
@@ -27,6 +28,7 @@ function makeTracker(
   let cursor = 0;
   let blocked = false;
   let done = false;
+  let confirmation: ConfirmationRequest | null = null;
 
   const tracker = new TranscriptTracker({
     words,
@@ -35,6 +37,10 @@ function makeTracker(
     detectMistakes: patch.detectMistakes ?? true,
     detectTashkeel: patch.detectTashkeel ?? true,
     dontProgressUntilFixed: patch.dontProgressUntilFixed ?? false,
+    confirmMistakes: patch.confirmMistakes ?? false,
+    onConfirmation: (request) => {
+      confirmation = request;
+    },
     onEvent: (word, type, meta) => events.push({ key: word.key, type, meta }),
     onBlocked: (value) => {
       blocked = value;
@@ -53,6 +59,7 @@ function makeTracker(
     cursor: () => cursor,
     blocked: () => blocked,
     done: () => done,
+    confirmation: () => confirmation,
   };
 }
 
@@ -93,6 +100,45 @@ describe('TranscriptTracker', () => {
     h.tracker.feed([spoken[0]]);
     expect(h.events.map((e) => e.type)).toEqual(['wrong', 'correct']);
     expect(h.cursor()).toBe(1);
+  });
+
+  it('holds a suspected mistake until the reader confirms it', () => {
+    const h = makeTracker({ confirmMistakes: true });
+    h.tracker.feed(['سيارة', 'سيارة']);
+    expect(h.events).toHaveLength(0);
+    expect(h.confirmation()?.heard).toBe('سيارة');
+    expect(h.blocked()).toBe(true);
+
+    // While the card is open, further recognition cannot move the cursor.
+    h.tracker.feed([spoken[0]]);
+    expect(h.cursor()).toBe(0);
+
+    h.tracker.resolveConfirmation('wrong');
+    expect(h.events.map((e) => e.type)).toEqual(['wrong']);
+    expect(h.events[0].meta?.recitedText).toBe('سيارة');
+    expect(h.confirmation()).toBeNull();
+    expect(h.blocked()).toBe(false);
+
+    h.tracker.feed([spoken[0]]);
+    expect(h.events.map((e) => e.type)).toEqual(['wrong', 'correct']);
+  });
+
+  it('accepts the reader saying the misheard word was correct', () => {
+    const h = makeTracker({ confirmMistakes: true });
+    h.tracker.feed(['سيارة', 'سيارة']);
+    h.tracker.resolveConfirmation('correct');
+    expect(h.events.map((e) => e.type)).toEqual(['correct']);
+    expect(h.cursor()).toBe(1);
+    expect(h.confirmation()).toBeNull();
+  });
+
+  it('skips a misheard word without recording any mistake', () => {
+    const h = makeTracker({ confirmMistakes: true });
+    h.tracker.feed(['سيارة', 'سيارة']);
+    h.tracker.resolveConfirmation('skip');
+    expect(h.events).toHaveLength(0);
+    expect(h.cursor()).toBe(1);
+    expect(h.confirmation()).toBeNull();
   });
 
   it('forgets a stray token when the reader continues correctly', () => {

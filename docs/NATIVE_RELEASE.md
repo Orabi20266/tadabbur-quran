@@ -23,7 +23,23 @@ npx cap sync android   # أو: npx cap sync ios
 
 - على كل push/PR إلى `mobile/capacitor`: اختبارات + بناء ويب + APK للتصحيح + تحقق من بناء iOS للمحاكي.
 - على وسم `v*` (مثال `v1.0.1`) مع أسرار التوقيع: AAB موقّع لـ Google Play وIPA موقّع لـ App Store كأدوات (artifacts).
-- إذا لم تكن أسرار التوقيع مهيأة، يبقى الوسم ناجحاً لكنه يُنتج APK معاينة غير موقّع ولا يُنتج IPA؛ يُستخدم للاختبار الشخصي عبر GitHub Releases فقط.
+- إذا لم تكن أسرار التوقيع مهيأة، يبقى الوسم ناجحاً لكنه يُنتج APK معاينة غير موقّع؛ يُستخدم للاختبار الشخصي عبر GitHub Releases فقط.
+
+## IPA غير موقّع لخدمة appdb
+
+لا حاجة إلى شهادة Apple لتجربة التطبيق عبر خدمات التوقيع البديلة (مثل
+`appdb.to`)، إذ تُوقّع الخدمة النسخة بملف تعريف خاص بها عند التثبيت.
+
+```bash
+./scripts/build-unsigned-ipa.sh
+# الناتج: dist/tadabbur-ios-unsigned.ipa
+```
+
+السكربت يبني الويب، يزامن Capacitor، ينشئ أرشيف جهاز من دون توقيع
+(`CODE_SIGNING_ALLOWED=NO`) ثم يضغطه في IPA. ارفع الملف إلى وسم GitHub
+Releases، ثم انسخ رابط التحميل المباشر (`…/releases/download/<tag>/<file>.ipa`)
+وضعه في حقل `uploadAppByUrl` في appdb. هذا الإصدار للتجربة الشخصية؛ النشر في
+App Store يحتاج التوقيع الرسمي الموضح أعلاه.
 
 ## الأسرار المطلوبة في GitHub Actions
 

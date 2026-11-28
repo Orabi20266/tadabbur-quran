@@ -71,7 +71,7 @@ export function Dashboard() {
     {
       to: '/ask',
       icon: MessageCircle,
-      title: 'اسأل الدرر',
+      title: 'اسأل IslamQA',
       text: 'جواب منقول بنصّه مع مصدره.',
     },
     {

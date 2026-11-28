@@ -49,7 +49,11 @@ import type {
   WordStatus,
 } from '../lib/types';
 import { TranscriptTracker } from '../lib/tracker';
-import type { TrackerMeta } from '../lib/tracker';
+import type {
+  ConfirmationChoice,
+  ConfirmationRequest,
+  TrackerMeta,
+} from '../lib/tracker';
 import { playMistakeSound, primeMistakeSound } from '../lib/sound';
 import { muqattaahAt, spokenHint } from '../lib/muqattaat';
 import { usePlatformSpeech } from '../lib/usePlatformSpeech';
@@ -93,6 +97,8 @@ export function Reader() {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState(0);
   const [blockedWord, setBlockedWord] = useState<DetectorWord | null>(null);
+  /** A misheard word awaiting the reader's decision; no mistake is stored yet. */
+  const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [cursor, setCursor] = useState(0);
   const [mistakesOpen, setMistakesOpen] = useState(false);
   const [historyWord, setHistoryWord] = useState<string | null>(null);
@@ -249,6 +255,7 @@ export function Reader() {
       setRevealed({});
       setSummary(null);
       setBlockedWord(null);
+      setConfirmation(null);
       setCursor(0);
       pausedRef.current = false;
       setPaused(false);
@@ -301,6 +308,7 @@ export function Reader() {
     setPhase('read');
     setPaused(false);
     setBlockedWord(null);
+    setConfirmation(null);
     setCursor(0);
   }, [hidden, stopSpeech, surah, to]);
 
@@ -422,6 +430,10 @@ export function Reader() {
       // Mistakes are shown in red and announced with a tone; they never halt
       // the session or hold the cursor.
       dontProgressUntilFixed: false,
+      // A misheard word is never written into the session without the
+      // reader confirming what was actually recited.
+      confirmMistakes: true,
+      onConfirmation: setConfirmation,
       onEvent: (w, t, meta) => eventRef.current(w, t, meta),
       onBlocked: (b) => setBlockedWord(b ? lastWordRef.current : null),
       onDone: () => doneRef.current(),
@@ -455,6 +467,12 @@ export function Reader() {
     // Session options are captured when the session starts on purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, sessionId, from]);
+
+  // While a suspected mistake waits for a decision the tracker drops tokens.
+  // Stop the mic so nothing is lost; the confirmation button restarts it.
+  useEffect(() => {
+    if (confirmation) stopSpeech();
+  }, [confirmation, stopSpeech]);
 
   const wrappedEvent = useCallback(
     (w: DetectorWord, t: EventType, meta?: TrackerMeta) => {
@@ -566,6 +584,17 @@ export function Reader() {
     if (phase !== 'live' || paused || blockedWord) return;
     trackerRef.current?.step();
   };
+
+  const resolveConfirmation = useCallback(
+    (choice: ConfirmationChoice) => {
+      trackerRef.current?.resolveConfirmation(choice);
+      // The click is a fresh user gesture, safe for browsers that gate the mic.
+      if (engineRef.current === 'browser' && phase === 'live' && !pausedRef.current) {
+        startSpeech();
+      }
+    },
+    [phase, startSpeech],
+  );
 
   const markTashkeel = () => {
     if (phase !== 'live' || paused || blockedWord) return;
@@ -803,6 +832,42 @@ export function Reader() {
             </button>
             <button className="btn btn-sm btn-primary" onClick={switchToManual}>
               التتبّع اليدوي
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {phase === 'live' && confirmation ? (
+        <div className="confirm-banner" role="alertdialog" aria-live="assertive">
+          <span>
+            سمعنا «{confirmation.heard || 'كلمة غير واضحة'}» عند كلمة «
+            {wordsOf(
+              confirmation.word.surah,
+              confirmation.word.ayah,
+            )[confirmation.word.index] ?? ''
+            }». هل قرأتها خطأ؟
+          </span>
+          <div className="banner-actions">
+            <button
+              className="chip-btn"
+              type="button"
+              onClick={() => resolveConfirmation('correct')}
+            >
+              قرأتها صحيحة
+            </button>
+            <button
+              className="chip-btn is-danger"
+              type="button"
+              onClick={() => resolveConfirmation('wrong')}
+            >
+              خطأ
+            </button>
+            <button
+              className="chip-btn"
+              type="button"
+              onClick={() => resolveConfirmation('skip')}
+            >
+              تخطّي
             </button>
           </div>
         </div>

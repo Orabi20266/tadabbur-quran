@@ -1240,6 +1240,31 @@ h1 {
   margin-inline-start: auto;
 }
 
+/* A misheard word is held here until the reader confirms what was said. */
+.confirm-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 14px;
+  padding: 11px 13px;
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+
+.confirm-banner .banner-actions {
+  margin-inline-start: 0;
+}
+
+.chip-btn.is-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .consent {
   display: flex;
   flex-direction: column;
@@ -3207,7 +3232,7 @@ input[type='range'] {
 }
 
 /* ==========================================================================
-   المحادثة — اسأل الدرر، بشكل محادثة كاملة فوق شريط التنقل
+   المحادثة — اسأل IslamQA، بشكل محادثة كاملة فوق شريط التنقل
    ========================================================================== */
 
 .sr-only {
@@ -3808,7 +3833,37 @@ input[type='range'] {
   gap: 4px;
 }
 
-/* مقتطف موسوعة غير حديثية */
+/* جواب منقول من موقع IslamQA */
+.chat-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 0;
+}
+
+.chat-source-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.chat-answer-title {
+  margin: 6px 8px 2px;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.chat-answer-question {
+  margin: 0 8px 4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+/* مقتطف من جواب IslamQA */
 .chat-item {
   max-width: 94%;
   padding: 4px 4px 4px 6px;

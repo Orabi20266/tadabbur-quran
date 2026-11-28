@@ -14,6 +14,12 @@ describe('recogniser transcript cleanup', () => {
     ]);
   });
 
+  it('joins a particle even when the engine returns harakat', () => {
+    expect(mergeSplitParticles(['وَ', 'الله'])).toEqual(['وَالله']);
+    expect(nextTokens('قُلْ وَ', true, 0)?.tokens).toEqual(['قُلْ']);
+    expect(nextTokens('قُلْ وَ الله', false, 1)?.tokens).toEqual(['وَالله']);
+  });
+
   it('leaves ordinary tokens alone', () => {
     expect(mergeSplitParticles(['قل', 'هو', 'الله'])).toEqual([
       'قل',
@@ -40,8 +46,13 @@ describe('shared transcript cursor (web + native)', () => {
     expect(nextTokens('قل و الله', false, 1)?.tokens).toEqual(['والله']);
   });
 
-  it('moves the cursor back when the engine revises a transcript down', () => {
-    expect(nextTokens('قل هو', false, 3)).toEqual({ end: 2, tokens: [] });
+  it('never rewinds on an empty or shorter revised result', () => {
+    expect(nextTokens('', false, 3)).toBeNull();
+    expect(nextTokens('   ', true, 3)).toBeNull();
+    // Earlier words were already emitted; waiting avoids replaying them as
+    // false mistakes when the engine clears or revises its results list.
+    expect(nextTokens('قل هو', false, 2)).toBeNull();
+    expect(nextTokens('قل هو الله', false, 2)?.tokens).toEqual(['الله']);
   });
 });
 

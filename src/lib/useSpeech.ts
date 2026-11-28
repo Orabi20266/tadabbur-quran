@@ -123,12 +123,17 @@ function applyBias(rec: Recognizer, get?: () => string[]): boolean {
 /** Bare joining particles the recogniser sometimes splits off a word. */
 const JOINING_PARTICLE = new Set(['\u0648', '\u0641', '\u0628', '\u0644', '\u0643']);
 
+/** Harakat do not change whether a token is a joining particle. */
+function isJoiningParticle(token: string): boolean {
+  return JOINING_PARTICLE.has(token.replace(/[\u064b-\u065f\u0670]/g, ''));
+}
+
 /** Join a split «و الله» back into «والله» before the tracker sees it. */
 export function mergeSplitParticles(tokens: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (JOINING_PARTICLE.has(token) && i + 1 < tokens.length) {
+    if (isJoiningParticle(token) && i + 1 < tokens.length) {
       out.push(token + tokens[i + 1]);
       i += 1;
     } else {
@@ -155,15 +160,20 @@ export function nextTokens(
   consumed: number,
 ): TokenStep | null {
   const tokens = splitTranscript(transcript);
-  // A shorter revised transcript moves the mark down instead of replaying old
-  // words the reader has not said again.
-  if (tokens.length < consumed) return { end: tokens.length, tokens: [] };
+  // Empty results are common (silence, end of utterance, a cleared results
+  // list). They must never rewind the cursor: the next utterance would replay
+  // every earlier word as a false mistake.
+  if (!tokens.length) return null;
+  // `consumed` is a high-water mark. A revised-down transcript may be shorter,
+  // but its earlier words were already fed; emitting them again is worse than
+  // waiting for the engine to catch up.
+  if (tokens.length <= consumed) return null;
   // The last interim token may still change; wait for more context/final.
   const stable = hasInterim ? Math.max(0, tokens.length - 1) : tokens.length;
   // A bare «و» at the end may be the first half of «والله»; hold it until the
   // next token arrives instead of feeding it as a one-letter word.
   let end = stable;
-  while (end > consumed && JOINING_PARTICLE.has(tokens[end - 1])) end -= 1;
+  while (end > consumed && isJoiningParticle(tokens[end - 1])) end -= 1;
   if (end <= consumed) return null;
   return { end, tokens: mergeSplitParticles(tokens.slice(consumed, end)) };
 }
@@ -253,7 +263,9 @@ export function useSpeech(
       for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         const transcript = result[0]?.transcript ?? '';
-        if (transcript) parts.push(transcript);
+        if (!transcript) continue;
+        parts.push(transcript);
+        // A trailing empty interim result must not hold the last word hostage.
         if (!result.isFinal) hasInterim = true;
       }
 

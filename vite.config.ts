@@ -5,6 +5,100 @@ import { VitePWA } from 'vite-plugin-pwa';
 /** The config runs in Node, but this project does not depend on @types/node. */
 declare const process: { env: Record<string, string | undefined> };
 
+/**
+ * IslamQA لا يرسل CORS، فالمتصفح لا يقرأ واجهته مباشرة. في التطوير نُشغّل
+ * نفس شكل ردّ عامل Cloudflare داخل Vite، حتى يعمل `/ask` من دون نشر العامل.
+ * الإنتاج يستخدم VITE_ISLAMQA_WORKER_URL (انظر worker/islamqa-proxy).
+ */
+function islamqaDevApi() {
+  const send = (res: any, status: number, body: unknown) => {
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(body));
+  };
+  const clean = (raw: string) =>
+    raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const text = (value: unknown) => (typeof value === 'string' ? value : '');
+
+  return {
+    name: 'islamqa-dev-api',
+    configureServer(server: any) {
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        const url = new URL(req.url ?? '/', 'http://localhost');
+        if (!url.pathname.startsWith('/islamqa-api')) return next();
+
+        if (url.pathname.includes('/health')) {
+          send(res, 200, { ok: true, source: 'https://islamqa.info' });
+          return;
+        }
+
+        const query = clean(url.searchParams.get('q') ?? '');
+        if (query.length < 2) {
+          send(res, 400, { ok: false, error: 'query-too-short' });
+          return;
+        }
+
+        try {
+          const searchParams = new URLSearchParams({
+            lang: 'ar',
+            limit: '12',
+            searchType: 'answer',
+            query,
+          });
+          const search = await (
+            await fetch(`https://islamqa.info/api/search?${searchParams}`, {
+              headers: { Accept: 'application/json' },
+            })
+          ).json();
+          const found = Array.isArray(search?.Search?.results)
+            ? search.Search.results
+            : [];
+          const ids = [
+            ...new Set(
+              found
+                .map((item: any) => Number(item?.id ?? item?.reference))
+                .filter((id: number) => Number.isSafeInteger(id) && id > 0),
+            ),
+          ].slice(0, 6) as number[];
+          const posts = await Promise.all(
+            ids.map((id) =>
+              fetch(`https://islamqa.info/api/posts/answer/${id}?lang=ar`, {
+                headers: { Accept: 'application/json' },
+              })
+                .then((response) => response.json())
+                .catch(() => null),
+            ),
+          );
+          const results = posts
+            .filter((post: any) => post && (post.title || post.body))
+            .map((post: any) => ({
+              id: Number(post.id ?? post.reference),
+              title: text(post.title),
+              question: text(post.question),
+              body: text(post.body),
+              url: `https://islamqa.info/ar/answers/${Number(post.id ?? post.reference)}`,
+            }));
+          if (!results.length) {
+            send(res, 502, { ok: false, error: 'upstream-blocked' });
+            return;
+          }
+          const total = Number(search?.Search?.total);
+          send(res, 200, {
+            ok: true,
+            source: 'https://islamqa.info',
+            query,
+            total: Number.isFinite(total) && total >= 0 ? total : results.length,
+            fetchedAt: Date.now(),
+            results,
+          });
+        } catch {
+          send(res, 502, { ok: false, error: 'upstream-blocked' });
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
   define: {
@@ -15,6 +109,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    islamqaDevApi(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['fonts/*.woff2', 'icon.svg'],

@@ -19,6 +19,15 @@ export interface TrackerMeta {
   confidence?: number;
 }
 
+/** A misheard word waiting for the reader to say what really happened. */
+export interface ConfirmationRequest {
+  word: DetectorWord;
+  /** What the recogniser thinks it heard; may be a partial word. */
+  heard: string;
+}
+
+export type ConfirmationChoice = 'correct' | 'wrong' | 'skip';
+
 /**
  * What a reader says before the first word of a session: the isti'adha, the
  * basmalah, or both. They are not part of the page being tracked, so hearing
@@ -91,6 +100,13 @@ export interface TranscriptTrackerConfig {  words: DetectorWord[];
    */
   detectPreamble?: boolean;
   detectMuqattaat?: boolean;
+  /**
+   * Hold suspected mistakes for the reader to confirm. Browser recognisers
+   * mishear words; with this on, a wrong event is never recorded automatically.
+   */
+  confirmMistakes?: boolean;
+  /** Receives a pending confirmation, or `null` when it has been resolved. */
+  onConfirmation?: (request: ConfirmationRequest | null) => void;
   onEvent: (word: DetectorWord, type: EventType, meta?: TrackerMeta) => void;
   onBlocked: (blocked: boolean) => void;
   onDone: () => void;
@@ -151,6 +167,8 @@ export class TranscriptTracker {
    * the cursor and never emits an event.
    */
   private preamble: string[] = [];
+  /** A suspected mistake the reader has not confirmed or dismissed yet. */
+  private pendingConfirmation: ConfirmationRequest | null = null;
 
   constructor(cfg: TranscriptTrackerConfig) {
     this.cfg = cfg;
@@ -195,9 +213,56 @@ export class TranscriptTracker {
     return this.done;
   }
 
+  /** The misheard word currently waiting for a decision, if any. */
+  pending(): ConfirmationRequest | null {
+    return this.pendingConfirmation;
+  }
+
+  /**
+   * Resolve a held mistake. `correct` marks the word recited and moves on,
+   * `wrong` records the mistake and waits for the reader to repeat the word,
+   * and `skip` moves on without accusing the reader of anything.
+   */
+  resolveConfirmation(choice: ConfirmationChoice): void {
+    const pending = this.pendingConfirmation;
+    if (!pending) return;
+    this.setConfirmation(null);
+    if (choice === 'wrong') {
+      // Keep `flagged` on this cursor so the same word is not charged twice.
+      this.flagged = this.cfg.words.indexOf(pending.word);
+      this.emit(pending.word, 'wrong', { recitedText: pending.heard });
+      this.setBlocked(false);
+      return;
+    }
+    if (choice === 'skip') {
+      this.skipSilently(1);
+      return;
+    }
+    this.advanceCorrect(1);
+  }
+
+  private setConfirmation(request: ConfirmationRequest | null): void {
+    this.pendingConfirmation = request;
+    this.cfg.onConfirmation?.(request);
+  }
+
+  /** Move past a word without emitting an event or recording a mistake. */
+  private skipSilently(count: number): void {
+    this.pendingRewind = null;
+    this.pendingUnknown = null;
+    this.pendingPartial = null;
+    this.letterRun = null;
+    this.preamble = [];
+    this.cursor = Math.min(this.cfg.normalized.length, this.cursor + count);
+    this.flagged = -1;
+    this.setBlocked(false);
+    this.cfg.onCursor(this.cursor);
+    if (this.cursor >= this.cfg.normalized.length) this.finish();
+  }
+
   /** New recognised tokens, in order. Only the hook feeds this. */
   feed(tokens: string[]): void {
-    if (this.done) return;
+    if (this.done || this.pendingConfirmation) return;
     for (const token of tokens) {
       if (this.done) return;
       this.handleToken(token);
@@ -206,13 +271,13 @@ export class TranscriptTracker {
 
   /** Manual advance when speech recognition is unavailable. One word exactly. */
   step(): void {
-    if (this.done || this.blocked) return;
+    if (this.done || this.blocked || this.pendingConfirmation) return;
     this.advanceCorrect(1);
   }
 
   /** Reader confirmed the flagged word; release the hold and move past it. */
   retry(): void {
-    if (this.done || !this.blocked) return;
+    if (this.done || !this.blocked || this.pendingConfirmation) return;
     this.pendingUnknown = null;
     this.pendingPartial = null;
     this.setBlocked(false);
@@ -234,6 +299,7 @@ export class TranscriptTracker {
     this.pendingPartial = null;
     this.letterRun = null;
     this.preamble = [];
+    this.setConfirmation(null);
     this.setBlocked(false);
     this.cfg.onCursor(this.cursor);
     if (this.cursor >= this.cfg.normalized.length) this.finish();
@@ -536,6 +602,22 @@ export class TranscriptTracker {
       // Do not accuse them for it: reveal the word and continue. A wider jump
       // is real evidence of a skipped passage and is still recorded.
       const merged = alignment.offset === 1;
+      // A jump over a word is only a *suspected* mistake. Ask first instead of
+      // writing a false error into the session when the engine dropped a token.
+      if (
+        this.cfg.confirmMistakes &&
+        this.cfg.detectMistakes &&
+        !merged &&
+        this.flagged !== this.cursor
+      ) {
+        const skipped = this.cfg.words[this.cursor];
+        if (skipped) {
+          this.flagged = this.cursor;
+          this.setConfirmation({ word: skipped, heard });
+          this.setBlocked(true);
+          return;
+        }
+      }
       for (let i = 0; i < alignment.offset; i++) {
         const at = this.cursor + i;
         const skipped = this.cfg.words[at];
@@ -682,8 +764,17 @@ export class TranscriptTracker {
   private handleWrong(token: string): void {
     if (!this.cfg.detectMistakes) return;
     if (this.flagged === this.cursor) return;
+    const word = this.cfg.words[this.cursor];
+    if (!word) return;
     this.flagged = this.cursor;
-    this.emit(this.cfg.words[this.cursor], 'wrong', { recitedText: token });
+    // Browser recognition is often wrong. Hold the accusation until the reader
+    // says whether the word was really misread.
+    if (this.cfg.confirmMistakes) {
+      this.setConfirmation({ word, heard: token });
+      this.setBlocked(true);
+      return;
+    }
+    this.emit(word, 'wrong', { recitedText: token });
     if (this.cfg.dontProgressUntilFixed) this.setBlocked(true);
   }
 

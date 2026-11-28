@@ -13,23 +13,17 @@ import {
   Trash2,
 } from 'lucide-react';
 import { arabicNumber } from '../lib/quran';
-import {
-  askDorar,
-  collectResults,
-  dorarQuery,
-  dorarSearchUrl,
-  DorarError,
-} from '../lib/dorar';
+import { askIslamqa, IslamqaError, islamqaSearchUrl } from '../lib/islamqa';
+import type { IslamqaAnswer, IslamqaAnswerSet } from '../lib/islamqa';
+import { collectResults } from '../lib/dorar';
 import type { DorarAnswer, DorarHadith, DorarItem } from '../lib/dorar';
-import {
-  getCachedAnswer,
-  offlineAnswers,
-  saveCachedAnswer,
-} from '../lib/dorarOffline';
+import { getCachedAnswer, offlineAnswers } from '../lib/dorarOffline';
 import type { CachedDorar } from '../lib/dorarOffline';
 import {
   countLine,
   DISCLAIMER,
+  DORAR_DISCLAIMER,
+  dorarCountLine,
   missingFor,
   NO_ANSWER,
   NO_AUTHENTIC,
@@ -40,12 +34,13 @@ import {
   WELCOME,
 } from '../lib/chatLines';
 
-const STORAGE_KEY = 'tadabbur.ask.v2';
-const LEGACY_KEY = 'tadabbur.ask.v1';
+const STORAGE_KEY = 'tadabbur.ask.v3';
+/** محادثات الإصدارات القديمة كانت من مصدر آخر، فلا تُعرض هنا. */
+const LEGACY_KEYS = ['tadabbur.ask.v2', 'tadabbur.ask.v1'];
 const MAX_STORED = 8;
 /** ما يُحفظ من كل جواب في localStorage. */
-const MAX_KEPT = 12;
-/** ما يُعرض قبل «عرض المزيد». الجواب يبدأ قصيراً. */
+const MAX_KEPT = 6;
+/** ما يُعرض قبل «عرض المزيد». */
 const FIRST_VIEW = 3;
 
 type TurnStatus = 'pending' | 'ready' | 'error';
@@ -56,8 +51,11 @@ interface Turn {
   /** وقت السؤال، لعرضه في فقاعة المحادثة. */
   at: number;
   status: TurnStatus;
-  answer?: DorarAnswer;
-  /** الإجابة جاءت من التخزين المحلي لا من الشبكة. */
+  /** البحث الجديد يأتي من IslamQA وحده. */
+  answer?: IslamqaAnswerSet;
+  /** الإجابات القديمة المحفوظة من الدرر تبقى قابلة للقراءة دون اتصال. */
+  dorar?: DorarAnswer;
+  /** الإجابة جاءت من المحفوظات لا من الشبكة. */
   cached?: boolean;
   error?: string;
 }
@@ -76,22 +74,20 @@ const SUGGESTIONS = [
 ];
 
 const ERROR_TEXT: Record<string, string> = {
+  'not-configured':
+    'لم يُضبط بعد رابط وسيط IslamQA. راجع إعدادات النشر في ملف .env.example.',
   'upstream-blocked':
-    'تعذّر الوصول إلى الدرر السنية الآن. قد يحمي الموقع بحثه مؤقتاً؛ أعد المحاولة بعد لحظات أو افتح البحث مباشرة.',
-  'upstream-unreachable':
-    'خدمة الدرر لا تستجيب الآن. تحقّق من اتصالك ثم أعد المحاولة.',
-  'upstream-invalid': 'وصل ردّ غير مفهوم من خدمة الدرر. أعد المحاولة.',
-  'upstream-shape': 'تغيّرت صيغة نتيجة الدرر. أعد المحاولة لاحقاً.',
+    'تعذّر الوصول إلى موقع IslamQA الآن. أعد المحاولة بعد لحظات، أو افتح البحث في الموقع.',
+  'bad-response': 'وصل ردّ غير مفهوم من خدمة البحث. أعد المحاولة.',
   network: 'تعذّر الاتصال بخدمة البحث. تحقّق من اتصالك ثم أعد المحاولة.',
   timeout: 'تأخّر البحث أكثر من المتوقع. أعد المحاولة بعد لحظات.',
   'query-too-short': 'اكتب سؤالاً أوضح بكلمتين على الأقل.',
-  'invalid-response': 'وصل ردّ غير مفهوم من الخدمة. أعد المحاولة.',
 };
 
 function errorMessage(code: string | undefined): string {
   return (
     (code ? ERROR_TEXT[code] : undefined) ??
-    'تعذّر إحضار النتائج الآن. أعد المحاولة أو افتح البحث في الدرر مباشرة.'
+    'تعذّر إحضار النتائج الآن. أعد المحاولة أو افتح البحث في موقع IslamQA.'
   );
 }
 
@@ -116,74 +112,65 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-/**
- * يقبل المحادثة المحفوظة بأي إصدار سابق: ما دام الجواب فيه `sources` فهو
- * صالح، وما كان بالصيغة القديمة (الحديث وحده) يُحوَّل إليها.
- */
-function normalizeAnswer(answer: unknown): DorarAnswer | undefined {
+function isAnswer(value: unknown): value is IslamqaAnswer {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<IslamqaAnswer>;
+  return (
+    typeof item.id === 'number' &&
+    Number.isSafeInteger(item.id) &&
+    item.id > 0 &&
+    typeof item.title === 'string'
+  );
+}
+
+/** لا تُقبل محادثة محفوظة إلا إن كانت نتائجها من IslamQA. */
+function normalizeAnswer(answer: unknown): IslamqaAnswerSet | undefined {
   if (!answer || typeof answer !== 'object') return undefined;
-  const record = answer as Partial<DorarAnswer> & {
-    hadiths?: DorarHadith[];
-    total?: number;
-    moreUrl?: string;
-    cached?: boolean;
-  };
-  if (Array.isArray(record.sources)) {
-    return { ...record, cached: record.cached === true } as DorarAnswer;
-  }
-  if (!Array.isArray(record.hadiths)) return undefined;
-  const total = typeof record.total === 'number' ? record.total : record.hadiths.length;
-  const moreUrl = record.moreUrl ?? dorarSearchUrl(record.query ?? '');
+  const record = answer as Partial<IslamqaAnswerSet>;
+  if (!Array.isArray(record.answers)) return undefined;
+  const answers = record.answers.filter(isAnswer).slice(0, MAX_KEPT);
   return {
-    query: record.query ?? '',
-    hadiths: record.hadiths,
-    total,
-    moreUrl,
-    partial: false,
-    sources: [
-      {
-        source: 'hadith',
-        label: 'الموسوعة الحديثية',
-        short: 'الحديث',
-        ok: true,
-        total,
-        moreUrl,
-        hadiths: record.hadiths,
-        items: [],
-      },
-    ],
+    query: typeof record.query === 'string' ? record.query : '',
+    answers,
+    total: typeof record.total === 'number' ? record.total : answers.length,
+    fetchedAt: typeof record.fetchedAt === 'number' ? record.fetchedAt : Date.now(),
   };
+}
+
+function isDorarAnswer(value: unknown): value is DorarAnswer {
+  return Boolean(value && typeof value === 'object' && Array.isArray((value as DorarAnswer).sources));
 }
 
 function loadTurns(): Turn[] {
   try {
-    const key = localStorage.getItem(STORAGE_KEY) ? STORAGE_KEY : LEGACY_KEY;
-    const raw = localStorage.getItem(key);
+    // مصدر الجواب تغيّر؛ لا نخلط نتائج قديمة من موقع آخر بهذه المحادثة.
+    for (const key of LEGACY_KEYS) localStorage.removeItem(key);
+    const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Partial<Stored>;
     if (!Array.isArray(parsed.turns)) return [];
-    const turns = parsed.turns
+    return parsed.turns
       .map((turn): Turn | null => {
         if (!turn || typeof turn.id !== 'string' || typeof turn.question !== 'string') {
           return null;
         }
         if (turn.status !== 'ready' && turn.status !== 'error') return null;
         const answer = normalizeAnswer(turn.answer);
-        if (turn.status === 'ready' && !answer) return null;
+        const dorar = isDorarAnswer(turn.dorar) ? turn.dorar : undefined;
+        if (turn.status === 'ready' && !answer && !dorar) return null;
         return {
           id: turn.id,
           question: turn.question,
           at: typeof turn.at === 'number' ? turn.at : Date.now(),
           status: turn.status,
           answer,
+          dorar,
           cached: turn.cached === true,
           error: turn.error,
         };
       })
       .filter((turn): turn is Turn => turn !== null)
       .slice(-MAX_STORED);
-    if (key === LEGACY_KEY) localStorage.removeItem(LEGACY_KEY);
-    return turns;
   } catch {
     return [];
   }
@@ -195,19 +182,22 @@ function saveTurns(turns: Turn[]) {
       .filter((turn) => turn.status !== 'pending')
       .slice(-MAX_STORED)
       .map((turn) => {
-        if (!turn.answer) return turn;
-        return {
-          ...turn,
-          answer: {
-            ...turn.answer,
-            hadiths: turn.answer.hadiths.slice(0, MAX_KEPT),
-            sources: turn.answer.sources.map((result) => ({
-              ...result,
-              hadiths: result.hadiths.slice(0, MAX_KEPT),
-              items: result.items.slice(0, MAX_KEPT),
+        const saved: Turn = { ...turn };
+        if (saved.answer) {
+          saved.answer = { ...saved.answer, answers: saved.answer.answers.slice(0, MAX_KEPT) };
+        }
+        if (saved.dorar) {
+          saved.dorar = {
+            ...saved.dorar,
+            hadiths: saved.dorar.hadiths.slice(0, MAX_KEPT),
+            sources: saved.dorar.sources.map((source) => ({
+              ...source,
+              hadiths: source.hadiths.slice(0, MAX_KEPT),
+              items: source.items.slice(0, MAX_KEPT),
             })),
-          },
-        };
+          };
+        }
+        return saved;
       });
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ turns: slim }));
   } catch {
@@ -229,7 +219,7 @@ function hadithMeta(hadith: DorarHadith): string {
 
 function Typing() {
   return (
-    <span className="chat-typing" role="status" aria-label="أبحث في الدرر">
+    <span className="chat-typing" role="status" aria-label="أبحث في IslamQA">
       <span />
       <span />
       <span />
@@ -322,6 +312,319 @@ function ExcerptCard({
   );
 }
 
+function AnswerCard({
+  answer,
+  copyKey,
+  copied,
+  onCopy,
+  expanded,
+  onToggle,
+}: {
+  answer: IslamqaAnswer;
+  copyKey: string;
+  copied: string | null;
+  onCopy: (key: string, text: string) => void;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <li className={`chat-msg is-in chat-item${expanded ? ' is-open' : ''}`}>
+      <div className="chat-item-head">
+        <span className="chat-source-badge">الإسلام سؤال وجواب</span>
+        <button
+          className="chat-mini"
+          type="button"
+          onClick={() =>
+            onCopy(
+              copyKey,
+              [
+                answer.title,
+                answer.question ? `السؤال: ${answer.question}` : '',
+                `الجواب:\n${answer.body}`,
+                answer.url,
+              ]
+                .filter(Boolean)
+                .join('\n\n'),
+            )
+          }
+          aria-label="نسخ الجواب"
+        >
+          {copied === copyKey ? (
+            <Check size={13} aria-hidden />
+          ) : (
+            <Copy size={13} aria-hidden />
+          )}
+          {copied === copyKey ? 'نُسخ' : 'نسخ'}
+        </button>
+      </div>
+      <h3 className="chat-answer-title" dir="rtl">
+        {answer.title}
+      </h3>
+      {answer.question ? (
+        <p className="chat-answer-question" dir="rtl">
+          {answer.question}
+        </p>
+      ) : null}
+      <button
+        className="chat-item-body"
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <span className={`chat-item-text${expanded ? '' : ' is-clamped'}`}>
+          {answer.body}
+        </span>
+      </button>
+      <div className="chat-item-foot">
+        <a className="chat-mini" href={answer.url} target="_blank" rel="noreferrer">
+          اقرأ الجواب كاملاً في الموقع
+          <ExternalLink size={12} aria-hidden />
+        </a>
+        <button
+          className="chat-mini"
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          {expanded ? 'أقلّ' : 'توسيع'}
+          <ChevronDown
+            size={13}
+            aria-hidden
+            className={expanded ? 'is-flipped' : undefined}
+          />
+        </button>
+      </div>
+    </li>
+  );
+}
+
+interface TurnViewProps {
+  turn: Turn;
+  seed: number;
+  copied: string | null;
+  expanded: boolean;
+  openItems: Set<string>;
+  onCopy: (key: string, text: string) => void;
+  onToggleTurn: () => void;
+  onToggleItem: (key: string) => void;
+}
+
+/** إجابة محفوظة قديمة من الدرر: تُعرض كما حُفظت، ولا تُبحث بها من جديد. */
+function DorarTurn({
+  turn,
+  seed,
+  copied,
+  expanded,
+  openItems,
+  onCopy,
+  onToggleTurn,
+  onToggleItem,
+}: TurnViewProps & { turn: Turn & { dorar: DorarAnswer } }) {
+  const answer = turn.dorar;
+  const collected = collectResults(answer, 6, 6);
+  const entries: Array<
+    { kind: 'hadith'; hadith: DorarHadith } | { kind: 'excerpt'; item: DorarItem }
+  > = [
+    ...collected.hadiths.map((hadith) => ({ kind: 'hadith' as const, hadith })),
+    ...collected.excerpts.map((item) => ({ kind: 'excerpt' as const, item })),
+  ];
+  const total = entries.length;
+  const visible = expanded ? entries : entries.slice(0, FIRST_VIEW);
+  const hidden = total - visible.length;
+
+  if (!total) {
+    return (
+      <div className="chat-msg is-in is-no-answer">
+        <p className="chat-greeting">{NO_ANSWER}</p>
+        <p className="chat-note">{missingFor(seed)}</p>
+        <p className="chat-note">{NOT_FOUND}</p>
+        <div className="chat-foot-actions">
+          <a
+            className="chat-action"
+            href={answer.moreUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ExternalLink size={14} aria-hidden />
+            البحث في الدرر
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="chat-msg is-in">
+        <p className="chat-greeting">{openingFor(seed)}</p>
+        <p>{dorarCountLine(answer.query, total)}</p>
+        {turn.cached ? (
+          <p className="chat-note">من المحفوظات على جهازك — قد لا تكون هذه أحدث نتيجة.</p>
+        ) : null}
+        {!collected.hadiths.length && collected.skippedWeak ? (
+          <p className="chat-warning">{NO_AUTHENTIC}</p>
+        ) : null}
+        {answer.partial ? <p className="chat-note">{PARTIAL}</p> : null}
+        <span className="chat-meta">
+          <time>{clock(turn.at)}</time>
+        </span>
+      </div>
+
+      <ol className="chat-results">
+        {visible.map((entry) =>
+          entry.kind === 'hadith' ? (
+            <HadithCard
+              key={`${turn.id}|h|${entry.hadith.text.slice(0, 24)}`}
+              hadith={entry.hadith}
+              copyKey={`${turn.id}|h|${entry.hadith.text.slice(0, 24)}`}
+              copied={copied}
+              onCopy={onCopy}
+            />
+          ) : (
+            <ExcerptCard
+              key={`${turn.id}|e|${entry.item.url}`}
+              item={entry.item}
+              expanded={openItems.has(`${turn.id}|e|${entry.item.url}`)}
+              onToggle={() => onToggleItem(`${turn.id}|e|${entry.item.url}`)}
+            />
+          ),
+        )}
+      </ol>
+
+      <div className="chat-list-foot">
+        {hidden > 0 || expanded ? (
+          <button className="chat-action" type="button" onClick={onToggleTurn}>
+            <ChevronDown
+              size={14}
+              aria-hidden
+              className={expanded ? 'is-flipped' : undefined}
+            />
+            {expanded ? 'أقلّ' : `عرض المزيد (${arabicNumber(hidden)})`}
+          </button>
+        ) : null}
+        <a
+          className="chat-action"
+          href={answer.moreUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ExternalLink size={14} aria-hidden />
+          كل النتائج في الدرر
+        </a>
+      </div>
+
+      <div className="chat-msg is-in is-foot">
+        <p className="chat-note">{DORAR_DISCLAIMER}</p>
+        <span className="chat-meta">
+          <time>{clock(turn.at)}</time>
+        </span>
+      </div>
+    </>
+  );
+}
+
+function IslamqaTurn({
+  turn,
+  seed,
+  copied,
+  expanded,
+  openItems,
+  onCopy,
+  onToggleTurn,
+  onToggleItem,
+}: TurnViewProps & { turn: Turn & { answer: IslamqaAnswerSet } }) {
+  const answer = turn.answer;
+  const entries = answer.answers;
+  const total = entries.length;
+  const visible = expanded ? entries : entries.slice(0, FIRST_VIEW);
+  const hidden = total - visible.length;
+
+  if (!total) {
+    return (
+      <div className="chat-msg is-in is-no-answer">
+        <p className="chat-greeting">{NO_ANSWER}</p>
+        <p className="chat-note">{missingFor(seed)}</p>
+        <p className="chat-note">{NOT_FOUND}</p>
+        <div className="chat-foot-actions">
+          <a
+            className="chat-action"
+            href={islamqaSearchUrl(answer.query || turn.question)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ExternalLink size={14} aria-hidden />
+            البحث في الموقع
+          </a>
+        </div>
+        <span className="chat-meta">
+          <time>{clock(turn.at)}</time>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="chat-msg is-in">
+        <p className="chat-greeting">{openingFor(seed)}</p>
+        <p>{countLine(answer.query, total)}</p>
+        {turn.cached ? (
+          <p className="chat-note">من المحفوظات على جهازك — قد لا تكون هذه أحدث نتيجة.</p>
+        ) : null}
+        <span className="chat-meta">
+          <time>{clock(turn.at)}</time>
+        </span>
+      </div>
+
+      <ol className="chat-results">
+        {visible.map((item) => {
+          const key = `${turn.id}|${item.id}`;
+          return (
+            <AnswerCard
+              key={key}
+              answer={item}
+              copyKey={key}
+              copied={copied}
+              onCopy={onCopy}
+              expanded={openItems.has(key)}
+              onToggle={() => onToggleItem(key)}
+            />
+          );
+        })}
+      </ol>
+
+      <div className="chat-list-foot">
+        {hidden > 0 || expanded ? (
+          <button className="chat-action" type="button" onClick={onToggleTurn}>
+            <ChevronDown
+              size={14}
+              aria-hidden
+              className={expanded ? 'is-flipped' : undefined}
+            />
+            {expanded ? 'أقلّ' : `عرض المزيد (${arabicNumber(hidden)})`}
+          </button>
+        ) : null}
+        <a
+          className="chat-action"
+          href={islamqaSearchUrl(turn.question)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ExternalLink size={14} aria-hidden />
+          كل النتائج في الموقع
+        </a>
+      </div>
+
+      <div className="chat-msg is-in is-foot">
+        <p className="chat-note">{DISCLAIMER}</p>
+        <span className="chat-meta">
+          <time>{clock(turn.at)}</time>
+        </span>
+      </div>
+    </>
+  );
+}
+
 export function Ask() {
   const [turns, setTurns] = useState<Turn[]>(loadTurns);
   const [saved, setSaved] = useState<CachedDorar[]>(offlineAnswers);
@@ -355,55 +658,26 @@ export function Ask() {
 
   const run = useCallback(async (id: string, question: string) => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 75000);
+    const timer = window.setTimeout(() => controller.abort(), 45000);
     try {
-      let answer: DorarAnswer;
-      try {
-        answer = await askDorar(question, undefined, controller.signal);
-      } catch (error) {
-        // العامل يفتح متصفحاً واحداً؛ قد يفشل فتحه لحظة انشغال الجلسة السابقة
-        // فيرجع 502 سريعاً. محاولة ثانية بعد لحظتين تُنجح الطلب غالباً، ولا
-        // تُخفى الأخطاء الحقيقية لأن غير هذا الرمز يُرفع كما هو.
-        if (
-          (error as Error).name === 'AbortError' ||
-          !(error instanceof DorarError) ||
-          error.code !== 'upstream-blocked'
-        ) {
-          throw error;
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 2500));
-        answer = await askDorar(question, undefined, controller.signal);
-      }
+      const answer = await askIslamqa(question, controller.signal);
       if (!mountedRef.current) return;
-      saveCachedAnswer(question, answer);
-      setSaved(offlineAnswers());
       setTurns((prev) =>
         prev.map((turn) =>
           turn.id === id
-            ? {
-                ...turn,
-                status: 'ready',
-                answer,
-                cached: false,
-                error: undefined,
-              }
+            ? { ...turn, status: 'ready', answer, dorar: undefined, cached: false, error: undefined }
             : turn,
         ),
       );
     } catch (error) {
       if (!mountedRef.current) return;
+      // البحث الجديد IslamQA فقط؛ المحفوظات القديمة تُعرض عند تعذّر الاتصال.
       const cached = getCachedAnswer(question);
       if (cached) {
         setTurns((prev) =>
           prev.map((turn) =>
             turn.id === id
-              ? {
-                  ...turn,
-                  status: 'ready',
-                  answer: cached,
-                  cached: true,
-                  error: undefined,
-                }
+              ? { ...turn, status: 'ready', answer: undefined, dorar: cached, cached: true, error: undefined }
               : turn,
           ),
         );
@@ -412,7 +686,7 @@ export function Ask() {
       const code =
         (error as Error).name === 'AbortError'
           ? 'timeout'
-          : error instanceof DorarError
+          : error instanceof IslamqaError
             ? error.code
             : 'network';
       setTurns((prev) =>
@@ -471,7 +745,7 @@ export function Ask() {
             question: entry.query,
             at: Date.now(),
             status: 'ready' as const,
-            answer: entry.answer,
+            dorar: entry.answer,
             cached: true,
           },
         ].slice(-MAX_STORED),
@@ -506,7 +780,7 @@ export function Ask() {
     });
   }, []);
 
-  const copyHadith = useCallback((key: string, text: string) => {
+  const copyText = useCallback((key: string, text: string) => {
     const done = () => {
       setCopied(key);
       window.setTimeout(
@@ -520,7 +794,7 @@ export function Ask() {
   }, []);
 
   const scopeLabel = useMemo(
-    () => (turns.some((turn) => turn.status === 'pending') ? 'يكتب…' : 'متصل'),
+    () => (turns.some((turn) => turn.status === 'pending') ? 'يبحث…' : 'متصل'),
     [turns],
   );
 
@@ -531,16 +805,16 @@ export function Ask() {
           <BookMarked size={20} />
         </span>
         <span className="chat-id">
-          <strong>الدرر السنية</strong>
-          <small>موسوعات الدرر · {scopeLabel}</small>
+          <strong>الإسلام سؤال وجواب</strong>
+          <small>islamqa.info · {scopeLabel}</small>
         </span>
         <span className="chat-head-actions">
           <a
             className="chat-icon-btn"
-            href="https://dorar.net"
+            href="https://islamqa.info/ar"
             target="_blank"
             rel="noreferrer"
-            aria-label="فتح موقع الدرر السنية"
+            aria-label="فتح موقع الإسلام سؤال وجواب"
           >
             <ExternalLink size={17} />
           </a>
@@ -574,7 +848,7 @@ export function Ask() {
                   type="button"
                   onClick={() => openCached(entry)}
                   disabled={busy}
-                  title={entry.query}
+                  title={`إجابة محفوظة من الدرر: ${entry.query}`}
                 >
                   {entry.query}
                 </button>
@@ -586,7 +860,8 @@ export function Ask() {
           </div>
         ) : null}
         <p className="chat-notice">
-          النتائج من موسوعات الدرر السنية، ويُقدَّم الصحيح والحسن.
+          الجواب منقول حرفياً من موقع IslamQA، ولا نضيف إليه رأياً. والمحفوظات
+          القديمة من الدرر تبقى على جهازك.
         </p>
 
         {turns.length === 0 ? (
@@ -614,24 +889,16 @@ export function Ask() {
 
         {turns.map((turn) => {
           const seed = seedFor(turn.id);
-          const answer = turn.answer;
-          const collected = answer ? collectResults(answer, 6, 6) : null;
-          const entries: Array<
-            { kind: 'hadith'; hadith: DorarHadith } | { kind: 'excerpt'; item: DorarItem }
-          > = [
-            ...(collected?.hadiths ?? []).map((hadith) => ({
-              kind: 'hadith' as const,
-              hadith,
-            })),
-            ...(collected?.excerpts ?? []).map((item) => ({
-              kind: 'excerpt' as const,
-              item,
-            })),
-          ];
-          const total = entries.length;
-          const expanded = openTurns.has(turn.id);
-          const visible = expanded ? entries : entries.slice(0, FIRST_VIEW);
-          const hidden = total - visible.length;
+          const viewProps: TurnViewProps = {
+            turn,
+            seed,
+            copied,
+            expanded: openTurns.has(turn.id),
+            openItems,
+            onCopy: copyText,
+            onToggleTurn: () => toggleTurn(turn.id),
+            onToggleItem: toggleItem,
+          };
 
           return (
             <div className="chat-turn" key={turn.id}>
@@ -662,11 +929,11 @@ export function Ask() {
                     </button>
                     <a
                       className="chat-action"
-                      href={dorarSearchUrl(dorarQuery(turn.question))}
+                      href={islamqaSearchUrl(turn.question)}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      افتح الدرر
+                      افتح الموقع
                       <ExternalLink size={13} aria-hidden />
                     </a>
                   </div>
@@ -674,104 +941,15 @@ export function Ask() {
                     <time>{clock(turn.at)}</time>
                   </span>
                 </div>
-              ) : answer && total > 0 ? (
-                <>
-                  <div className="chat-msg is-in">
-                    <p className="chat-greeting">{openingFor(seed)}</p>
-                    <p>{countLine(answer.query, total)}</p>
-                    {turn.cached ? (
-                      <p className="chat-note">
-                        من المحفوظات على جهازك — قد لا تكون هذه أحدث نتيجة.
-                      </p>
-                    ) : null}
-                    {!collected?.hadiths.length && collected?.skippedWeak ? (
-                      <p className="chat-warning">{NO_AUTHENTIC}</p>
-                    ) : null}
-                    {answer.partial ? (
-                      <p className="chat-note">{PARTIAL}</p>
-                    ) : null}
-                    <span className="chat-meta">
-                      <time>{clock(turn.at)}</time>
-                    </span>
-                  </div>
-
-                  <ol className="chat-results">
-                    {visible.map((entry) =>
-                      entry.kind === 'hadith' ? (
-                        <HadithCard
-                          key={`${turn.id}|h|${entry.hadith.text.slice(0, 24)}`}
-                          hadith={entry.hadith}
-                          copyKey={`${turn.id}|h|${entry.hadith.text.slice(0, 24)}`}
-                          copied={copied}
-                          onCopy={copyHadith}
-                        />
-                      ) : (
-                        <ExcerptCard
-                          key={`${turn.id}|${entry.item.url}`}
-                          item={entry.item}
-                          expanded={openItems.has(`${turn.id}|${entry.item.url}`)}
-                          onToggle={() =>
-                            toggleItem(`${turn.id}|${entry.item.url}`)
-                          }
-                        />
-                      ),
-                    )}
-                  </ol>
-
-                  <div className="chat-list-foot">
-                    {hidden > 0 || expanded ? (
-                      <button
-                        className="chat-action"
-                        type="button"
-                        onClick={() => toggleTurn(turn.id)}
-                      >
-                        <ChevronDown
-                          size={14}
-                          aria-hidden
-                          className={expanded ? 'is-flipped' : undefined}
-                        />
-                        {expanded ? 'أقلّ' : `عرض المزيد (${arabicNumber(hidden)})`}
-                      </button>
-                    ) : null}
-                    <a
-                      className="chat-action"
-                      href={answer.moreUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink size={14} aria-hidden />
-                      كل النتائج في الدرر
-                    </a>
-                  </div>
-
-                  <div className="chat-msg is-in is-foot">
-                    <p className="chat-note">{DISCLAIMER}</p>
-                    <span className="chat-meta">
-                      <time>{clock(turn.at)}</time>
-                    </span>
-                  </div>
-                </>
+              ) : turn.dorar ? (
+                <DorarTurn {...viewProps} turn={{ ...turn, dorar: turn.dorar }} />
+              ) : turn.answer ? (
+                <IslamqaTurn {...viewProps} turn={{ ...turn, answer: turn.answer }} />
               ) : (
                 <div className="chat-msg is-in is-no-answer">
                   <p className="chat-greeting">{NO_ANSWER}</p>
                   <p className="chat-note">{missingFor(seed)}</p>
                   <p className="chat-note">{NOT_FOUND}</p>
-                  <div className="chat-foot-actions">
-                    <a
-                      className="chat-action"
-                      href={
-                        answer?.moreUrl ?? dorarSearchUrl(dorarQuery(turn.question))
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink size={14} aria-hidden />
-                      البحث في الدرر
-                    </a>
-                  </div>
-                  <span className="chat-meta">
-                    <time>{clock(turn.at)}</time>
-                  </span>
                 </div>
               )}
             </div>
@@ -787,7 +965,7 @@ export function Ask() {
         }}
       >
         <label className="sr-only" htmlFor="chat-input">
-          سؤالك للدرر السنية
+          سؤالك للإسلام سؤال وجواب
         </label>
         <div className="chat-field">
           <input
